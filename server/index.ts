@@ -1,15 +1,16 @@
 import express from 'express';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 
 const app = express();
 app.use(express.static('public'));
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*' }
 });
 
-io.on('connection', (socket) => {
+io.on('connection', (socket: Socket) => {
   console.log('A player connected:', socket.id);
 
   socket.on('disconnect', () => {
@@ -17,7 +18,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = 3000;
+const PORT: number = 3000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

@@ -1,4 +1,27 @@
+# Dependencies
 node_modules/
+
+# Environment variables
 .env
+.env.local
+
+# Build output
 dist/
 build/
+
+# TypeScript
+*.tsbuildinfo
+
+# ESLint cache
+.eslintcache
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+npm-debug.log*
