@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { createRoom, getRoom, joinRoom, rejoinRoom, assignRoles, toPublicRoom, leaveRoom } from './rooms.js';
+import { createRoom, getRoom, joinRoom, rejoinRoom, assignRoles, toPublicRoom, leaveRoom, handleDisconnect } from './rooms.js';
 import { SOCKET_EVENTS } from '../shared/events.js';
 
 const app = express();
@@ -17,6 +17,9 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('disconnect', () => {
     console.log('A player disconnected:', socket.id);
+    handleDisconnect(socket.id, (roomCode, room) => {
+      io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(room));
+    });
   });
 
   socket.on(SOCKET_EVENTS.CREATE_ROOM, ({ name }: { name: string }) => {
@@ -78,6 +81,8 @@ io.on('connection', (socket: Socket) => {
     }
 
   });
+
+
 
 });
 

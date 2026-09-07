@@ -20,6 +20,18 @@ interface Room {
   };
 }
 
+// Tracks which room/player each live connection currently represents, so a
+// raw 'disconnect' event (which only gives us a socket.id) can be resolved
+// back into "which player, in which room, just disappeared."
+const socketToPlayer = new Map<string, { roomCode: string; playerId: string }>();
+
+// Tracks pending removal timers, keyed by playerId. A disconnect doesn't
+// remove a player immediately — it schedules removal 10s out, so a page
+// refresh (disconnect + near-instant rejoin) isn't treated as a real
+// departure. rejoinRoom cancels the timer if one exists.
+const pendingRemovals = new Map<string, NodeJS.Timeout>();
+const REJOIN_GRACE_PERIOD_MS = 3000;
+
 const rooms = new Map<string, Room>();
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0, I/1 — avoid ambiguity
@@ -54,6 +66,7 @@ export function createRoom(hostName: string, hostSocketId: string): { room: Room
   };
 
   rooms.set(code, room);
+  socketToPlayer.set(hostSocketId, { roomCode: code, playerId });
   return { room, playerId };
 }
 
@@ -75,6 +88,7 @@ export function joinRoom(
 
   const playerId = randomUUID();
   room.players[playerId] = { playerId, name, role: null, socketId };
+  socketToPlayer.set(socketId, { roomCode: room.code, playerId });
   return { room, playerId };
 }
 
@@ -95,7 +109,14 @@ export function rejoinRoom(
   const player = room.players[playerId];
   if (!player) return { error: 'Player not found in this room.' };
 
+  const pending = pendingRemovals.get(playerId);
+  if (pending) {
+    clearTimeout(pending);
+    pendingRemovals.delete(playerId);
+  }
+
   player.socketId = newSocketId;
+  socketToPlayer.set(newSocketId, { roomCode: room.code, playerId });
   return { room, playerId };
 }
 
@@ -149,4 +170,23 @@ export function leaveRoom(roomCode: string, playerId: string): Room | undefined 
   }
 
   return room;
+}
+
+export function handleDisconnect(
+  socketId: string,
+  onKick: (roomCode: string, room: Room) => void
+): void {
+  const entry = socketToPlayer.get(socketId);
+  socketToPlayer.delete(socketId);
+  if (!entry) return;
+
+  const { roomCode, playerId } = entry;
+
+  const timer = setTimeout(() => {
+    pendingRemovals.delete(playerId);
+    const room = leaveRoom(roomCode, playerId);
+    if (room) onKick(roomCode, room);
+  }, REJOIN_GRACE_PERIOD_MS);
+
+  pendingRemovals.set(playerId, timer);
 }
