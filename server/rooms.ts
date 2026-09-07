@@ -58,7 +58,7 @@ export function createRoom(hostName: string, hostSocketId: string): { room: Room
 }
 
 export function getRoom(code: string): Room | undefined {
-  return rooms.get(code.toUpperCase());
+  return rooms.get(code.toUpperCase().trim());
 }
 
 export function joinRoom(
