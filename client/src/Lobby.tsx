@@ -1,26 +1,15 @@
 import { useState, useEffect } from 'react';
-import { io, type Socket } from 'socket.io-client';
-import { SOCKET_EVENTS } from '../../shared/events';
-
-const socket: Socket = io('http://localhost:3000');
-
-interface Player {
-  playerId: string;
-  name: string;
-  role: string | null;
-  isHost: boolean;
-}
-
-interface RoomState {
-  code: string;
-  status: string;
-  players: Player[];
-}
+// ---- FIX 1: import real shared types (RoomPublic) instead of hand-rolled
+// local duplicates — Player/PrepState/RoomPublic interfaces below are gone ----
+import { SOCKET_EVENTS, type RoomPublic } from '../../shared/events';
+import { socket } from './socket';
+import PrepPhase from './PrepPhase';
+// ---- FIX 1 ABOVE ----
 
 function Lobby() {
   const [name, setName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [room, setRoom] = useState<RoomState | null>(null);
+  const [room, setRoom] = useState<RoomPublic | null>(null);
   const [myPlayerId, setMyPlayerId] = useState('');
   const [error, setError] = useState('');
 
@@ -39,7 +28,7 @@ function Lobby() {
   }, []);
 
   useEffect(() => {
-    socket.on(SOCKET_EVENTS.ROOM_UPDATE, (data: RoomState & { yourPlayerId?: string }) => {
+    socket.on(SOCKET_EVENTS.ROOM_UPDATE, (data: RoomPublic & { yourPlayerId?: string }) => {
       setRoom(data);
       if (data.yourPlayerId) {
         setMyPlayerId(data.yourPlayerId);
@@ -48,9 +37,15 @@ function Lobby() {
       }
     });
 
-    socket.on(SOCKET_EVENTS.ROLES_ASSIGNED, (data: RoomState) => {
+    socket.on(SOCKET_EVENTS.ROLES_ASSIGNED, (data: RoomPublic) => {
       setRoom(data);
     });
+
+    // ---- NEW: listen for prep-phase submission broadcasts ----
+    socket.on(SOCKET_EVENTS.PREP_UPDATE, (data: RoomPublic) => {
+      setRoom(data);
+    });
+    // ---- NEW ABOVE ----
 
     socket.on(SOCKET_EVENTS.ERROR, ({ message }: { message: string }) => {
       setError(message);
@@ -59,30 +54,36 @@ function Lobby() {
     return () => {
       socket.off(SOCKET_EVENTS.ROOM_UPDATE);
       socket.off(SOCKET_EVENTS.ROLES_ASSIGNED);
+      socket.off(SOCKET_EVENTS.PREP_UPDATE); // ---- NEW ----
       socket.off(SOCKET_EVENTS.ERROR);
     };
   }, []);
 
   const handleCreate = () => {
     setError('');
-    //if (!name.trim()) return;
+    
     socket.emit(SOCKET_EVENTS.CREATE_ROOM, { name });
   };
 
   const handleJoin = () => {
     setError('');
-    //if (!name.trim() || !joinCode.trim()) return;
+    //if (!name.trim()) return;
     socket.emit(SOCKET_EVENTS.JOIN_ROOM, { code: joinCode.toUpperCase(), name });
   };
 
   const handleStart = () => {
-    setError('');
+    // Not a silent failure path: this button only ever renders inside
+    // `{isHost && room.status === 'lobby' && ...}`, so `room` is always
+    // defined here in practice — this guard exists purely so TypeScript can
+    // narrow `room`'s type, not to handle a real error case.
     if (!room) return;
     socket.emit(SOCKET_EVENTS.START_GAME, { code: room.code });
   };
 
   const handleLeave = () => {
-    setError('');
+    // Same reasoning as handleStart above — this button only renders once a
+    // room already exists, so this is a type-narrowing guard, not a real
+    // error case that needs surfacing.
     if (!room) return;
     socket.emit(SOCKET_EVENTS.LEAVE_ROOM, { code: room.code, playerId: myPlayerId });
     sessionStorage.removeItem('playerId');
@@ -93,6 +94,22 @@ function Lobby() {
 
   const me = room?.players.find((p) => p.playerId === myPlayerId);
   const isHost = me?.isHost ?? false;
+
+  // ---- FIX: previously returned <PrepPhase /> alone here — any ERROR
+  // event received while in prep phase (e.g. a failed submission) would set
+  // `error` state, but nothing on screen ever displayed it, since this
+  // return happened before the error paragraph below. Wrapped in a
+  // Fragment (<>...</>) so both PrepPhase and the error message can be
+  // returned together without adding an unnecessary extra <div>. ----
+  if (room && room.status !== 'lobby') {
+    return (
+      <>
+        <PrepPhase room={room} myRole={me?.role ?? null} />
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+      </>
+    );
+  }
+  // ---- FIX ABOVE ----
 
   if (!room) {
     return (
@@ -134,11 +151,13 @@ function Lobby() {
         ))}
       </ul>
       {isHost && room.status === 'lobby' && (
-        <button onClick={handleStart} disabled={room.players.length !== 4} style={{ color: '#000000' }}>
+        <button onClick={handleStart} disabled={room.players.length !== 4}>
           Start Game ({room.players.length}/4)
         </button>
       )}
-      <div><button onClick={handleLeave} style={{ color: '#000000' }} >Leave Room</button></div>
+      <button onClick={handleLeave} style={{ color: '#000000' }}>
+        Leave Room
+      </button>
       {error && <p style={{ color: 'red' }}>{error}</p>}
     </div>
   );
