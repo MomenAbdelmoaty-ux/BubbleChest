@@ -11,7 +11,7 @@ const INSTRUMENT_NAMES = ['Instrument 1', 'Instrument 2', 'Instrument 3', 'Instr
 const PAIR_COLORS = ['#add8e6', '#90ee90']; // light blue, light green
 
 function useCountdown(endsAt: number | undefined) {
-  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState(-1);
 
   useEffect(() => {
     if (!endsAt) return;

@@ -151,7 +151,7 @@ function Lobby() {
         ))}
       </ul>
       {isHost && room.status === 'lobby' && (
-        <button onClick={handleStart} disabled={room.players.length !== 4}>
+        <button onClick={handleStart} disabled={room.players.length !== 4} style={{ color: '#000000' }}>
           Start Game ({room.players.length}/4)
         </button>
       )}
