@@ -13,8 +13,21 @@ export const SOCKET_EVENTS = {
   SUBMIT_BEAT: 'submit_beat',
   PREP_UPDATE: 'prep_update',
   // ---- NEW ABOVE ----
+  // ---- NEW: return-to-lobby event, fired from the round-end screen ----
+  RETURN_TO_LOBBY: 'return_to_lobby',
+  // ---- NEW ABOVE ----
   ERROR: 'room_error',
 } as const;
+
+// ---- NEW BELOW: shared beat-timing constants — used server-side to compute
+// how long the performance phase should last, and client-side to schedule
+// both audio playback and the line-carousel timing. Kept in one place so
+// server and client can never disagree about the math. ----
+export const BPM = 80;
+export const BEAT_STEPS = 8;
+export const STEP_MS = 60000 / BPM / 2; // eighth-note steps = 375ms at 80 BPM
+export const LOOP_MS = STEP_MS * BEAT_STEPS; // one full 8-step loop = 3000ms
+// ---- NEW ABOVE ----
 
 export type Role = 'rapper' | 'ghostwriter' | 'producer' | 'record-label';
 
@@ -41,5 +54,6 @@ export interface RoomPublic {
   status: 'lobby' | 'prep' | 'grace' | 'performance' | 'round-end';
   players: PlayerPublic[];
   prep?: PrepState;
-  numCouplets: number; // ---- NEW: exposes room.settings.numCouplets to clients ----
+  performance?: { startAt: number }; // ---- NEW: set once performance phase begins ----
+  numCouplets: number;
 }

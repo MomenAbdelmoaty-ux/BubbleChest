@@ -1,24 +1,21 @@
 import { useState, useEffect } from 'react';
-// ---- FIX 1: import real shared types (RoomPublic) instead of hand-rolled
-// local duplicates — Player/PrepState/RoomPublic interfaces below are gone ----
 import { SOCKET_EVENTS, type RoomPublic } from '../../shared/events';
 import { socket } from './socket';
 import PrepPhase from './PrepPhase';
-// ---- FIX 1 ABOVE ----
-
+import PerformancePhase from './PerformancePhase';
+import RoundEnd from './RoundEnd';
+ 
 function Lobby() {
   const [name, setName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [room, setRoom] = useState<RoomPublic | null>(null);
   const [myPlayerId, setMyPlayerId] = useState('');
   const [error, setError] = useState('');
-
-  // Attempt a silent rejoin on first mount (e.g. after a page refresh), using
-  // whatever playerId/roomCode were previously saved to sessionStorage.
+ 
+  // Attempt a silent rejoin on first mount (e.g. after a page refresh)
   useEffect(() => {
     const savedPlayerId = sessionStorage.getItem('playerId');
     const savedRoomCode = sessionStorage.getItem('roomCode');
-
     if (savedPlayerId && savedRoomCode) {
       socket.emit(SOCKET_EVENTS.REJOIN_ROOM, {
         playerId: savedPlayerId,
@@ -26,9 +23,10 @@ function Lobby() {
       });
     }
   }, []);
-
+ 
   useEffect(() => {
     socket.on(SOCKET_EVENTS.ROOM_UPDATE, (data: RoomPublic & { yourPlayerId?: string }) => {
+      console.log('[client] ROOM_UPDATE received:', data);
       setRoom(data);
       if (data.yourPlayerId) {
         setMyPlayerId(data.yourPlayerId);
@@ -36,54 +34,50 @@ function Lobby() {
         sessionStorage.setItem('roomCode', data.code);
       }
     });
-
+ 
     socket.on(SOCKET_EVENTS.ROLES_ASSIGNED, (data: RoomPublic) => {
+      console.log('[client] ROLES_ASSIGNED received:', data);
       setRoom(data);
     });
-
-    // ---- NEW: listen for prep-phase submission broadcasts ----
+ 
     socket.on(SOCKET_EVENTS.PREP_UPDATE, (data: RoomPublic) => {
+      console.log('[client] PREP_UPDATE received:', data);
       setRoom(data);
     });
-    // ---- NEW ABOVE ----
-
+ 
     socket.on(SOCKET_EVENTS.ERROR, ({ message }: { message: string }) => {
+      console.error('[client] ERROR received:', message);
       setError(message);
     });
-
+ 
     return () => {
       socket.off(SOCKET_EVENTS.ROOM_UPDATE);
       socket.off(SOCKET_EVENTS.ROLES_ASSIGNED);
-      socket.off(SOCKET_EVENTS.PREP_UPDATE); // ---- NEW ----
+      socket.off(SOCKET_EVENTS.PREP_UPDATE);
       socket.off(SOCKET_EVENTS.ERROR);
     };
   }, []);
-
+ 
   const handleCreate = () => {
     setError('');
-    
+    console.log('[client] emitting CREATE_ROOM:', { name });
     socket.emit(SOCKET_EVENTS.CREATE_ROOM, { name });
   };
-
+ 
   const handleJoin = () => {
     setError('');
-    //if (!name.trim()) return;
+    console.log('[client] emitting JOIN_ROOM:', { code: joinCode, name });
     socket.emit(SOCKET_EVENTS.JOIN_ROOM, { code: joinCode.toUpperCase(), name });
   };
-
+ 
   const handleStart = () => {
-    // Not a silent failure path: this button only ever renders inside
-    // `{isHost && room.status === 'lobby' && ...}`, so `room` is always
-    // defined here in practice — this guard exists purely so TypeScript can
-    // narrow `room`'s type, not to handle a real error case.
+    // Not a silent failure path — button only renders when room exists
     if (!room) return;
     socket.emit(SOCKET_EVENTS.START_GAME, { code: room.code });
   };
-
+ 
   const handleLeave = () => {
-    // Same reasoning as handleStart above — this button only renders once a
-    // room already exists, so this is a type-narrowing guard, not a real
-    // error case that needs surfacing.
+    // Not a silent failure path — button only renders when room exists
     if (!room) return;
     socket.emit(SOCKET_EVENTS.LEAVE_ROOM, { code: room.code, playerId: myPlayerId });
     sessionStorage.removeItem('playerId');
@@ -91,17 +85,11 @@ function Lobby() {
     setRoom(null);
     setMyPlayerId('');
   };
-
+ 
   const me = room?.players.find((p) => p.playerId === myPlayerId);
   const isHost = me?.isHost ?? false;
-
-  // ---- FIX: previously returned <PrepPhase /> alone here — any ERROR
-  // event received while in prep phase (e.g. a failed submission) would set
-  // `error` state, but nothing on screen ever displayed it, since this
-  // return happened before the error paragraph below. Wrapped in a
-  // Fragment (<>...</>) so both PrepPhase and the error message can be
-  // returned together without adding an unnecessary extra <div>. ----
-  if (room && room.status !== 'lobby') {
+ 
+  if (room && room.status === 'prep') {
     return (
       <>
         <PrepPhase room={room} myRole={me?.role ?? null} />
@@ -109,8 +97,25 @@ function Lobby() {
       </>
     );
   }
-  // ---- FIX ABOVE ----
-
+ 
+  if (room && room.status === 'performance') {
+    return (
+      <>
+        <PerformancePhase room={room} />
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+      </>
+    );
+  }
+ 
+  if (room && room.status === 'round-end') {
+    return (
+      <>
+        <RoundEnd room={room} />
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+      </>
+    );
+  }
+ 
   if (!room) {
     return (
       <div>
@@ -139,7 +144,7 @@ function Lobby() {
       </div>
     );
   }
-
+ 
   return (
     <div>
       <h1>Room: {room.code}</h1>
@@ -151,9 +156,12 @@ function Lobby() {
         ))}
       </ul>
       {isHost && room.status === 'lobby' && (
-        <button onClick={handleStart} disabled={room.players.length !== 4} style={{ color: '#000000' }}>
+        // ---- FIX 3: added style={{ color: '#000' }} to match every other
+        // button in the app — Start Game text was previously unreadable ----
+        <button onClick={handleStart} disabled={room.players.length !== 4} style={{ color: '#000' }}>
           Start Game ({room.players.length}/4)
         </button>
+        // ---- FIX 3 ABOVE ----
       )}
       <button onClick={handleLeave} style={{ color: '#000000' }}>
         Leave Room
@@ -162,5 +170,5 @@ function Lobby() {
     </div>
   );
 }
-
+ 
 export default Lobby;
