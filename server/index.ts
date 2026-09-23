@@ -7,7 +7,10 @@ import { createRoom, getRoom, joinRoom, rejoinRoom, assignRoles, toPublicRoom, l
 import { SOCKET_EVENTS } from '../shared/events.js';
 
 const app = express();
-app.use(express.static('public'));
+app.use(express.static('../client/dist'));
+app.get('*path', (_req, res) => {
+  res.sendFile('index.html', { root: '../client/dist' });
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {

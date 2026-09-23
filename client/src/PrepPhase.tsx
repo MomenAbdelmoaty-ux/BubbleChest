@@ -102,15 +102,13 @@ function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
   // updater function (the (prev) => form) because that's where we have
   // access to the new grid state to confirm the cell is now truly ON. ----
   const toggleCell = (row: number, col: number) => {
-    setGrid((prev) => {
-      const newGrid = prev.map((r, ri) => r.map((cell, ci) => (ri === row && ci === col ? !cell : cell)));
-      const cellIsNowOn = newGrid[row]?.[col] === true;
-      if (cellIsNowOn) {
-        void playOnce(row);
-      }
-      return newGrid;
-    });
-  };
+  if (!grid[row]?.[col]) {
+    void playOnce(row);
+  }
+  setGrid((prev) =>
+    prev.map((r, ri) => r.map((cell, ci) => (ri === row && ci === col ? !cell : cell)))
+  );
+};
   // ---- NEW ABOVE ----
 
   const submit = () => {

@@ -10,7 +10,7 @@ function lineContainerStyle(active: boolean): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: active ? 12 : 8,
     transition: 'all 0.3s ease',
   };
 }
