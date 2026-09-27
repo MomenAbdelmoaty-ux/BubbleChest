@@ -1,48 +1,78 @@
 import { useState, useEffect, useRef } from 'react';
-import { SOCKET_EVENTS, type PrepState, type RoomPublic } from '../../shared/events';
+// ---- CHANGED (A1): SOCKET_EVENTS from events; types from types; constants from constants ----
+import { SOCKET_EVENTS } from '../../shared/events';
+import type { PrepState, RoomPublic } from '../../shared/types';
+import { INPUT_GRACE_MS } from '../../shared/constants';
+// ---- CHANGED ABOVE (A1) ----
 import { socket } from './socket';
-import { SAMPLES, playOnce, previewLoop, stopPreview } from './audio';
+import { SAMPLES, playOnce, previewLoop } from './audio';
 
+// ---- CHANGED (C7): useCountdown now also tracks the INPUT_GRACE_MS window after time is up ----
 function useCountdown(endsAt: number | undefined) {
   const [secondsLeft, setSecondsLeft] = useState(-1);
+  const [inGracePeriod, setInGracePeriod] = useState(false);
 
   useEffect(() => {
     if (!endsAt) return;
     const tick = () => {
-      setSecondsLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+      const remaining = endsAt - Date.now();
+      setSecondsLeft(Math.max(0, Math.ceil(remaining / 1000)));
+      setInGracePeriod(remaining <= 0 && remaining > -INPUT_GRACE_MS);
     };
     tick();
     const interval = setInterval(tick, 250);
     return () => clearInterval(interval);
   }, [endsAt]);
 
-  return secondsLeft;
+  return { secondsLeft, inGracePeriod };
 }
+// ---- CHANGED ABOVE (C7) ----
 
+// ---- CHANGED (A2+A3): receives prep via rapBattle.prepState, passed as a prop here ----
 function TopicInput({ code, prep }: { code: string; prep: PrepState }) {
   const [topic, setTopic] = useState(prep.topic);
-  const secondsLeft = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED (C7): destructure both values from useCountdown ----
+  const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
 
+  // ---- CHANGED (C4): autoSubmitted.current = true set inside submit() so a
+  // manual submit prevents the auto-submit from also firing ----
   const submit = () => {
+    autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_TOPIC:', { code, topic });
     socket.emit(SOCKET_EVENTS.SUBMIT_TOPIC, { code, topic });
   };
+  // ---- CHANGED ABOVE (C4) ----
 
+  // ---- CHANGED (C7): auto-submit fires after INPUT_GRACE_MS, not immediately at 0 ----
   useEffect(() => {
-    if (secondsLeft === 0 && !autoSubmitted.current) {
+    if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
       submit();
     }
-  }, [secondsLeft]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft, inGracePeriod]);
+  // ---- CHANGED ABOVE (C7) ----
 
   return (
     <div>
       <h2>Record Label — pick the topic</h2>
-      <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. Monday mornings" />
-      <button onClick={submit} style={{ color: '#000' }}>
-        {prep.submitted.recordLabel ? 'Update Topic' : 'Submit Topic'}
-      </button>
+      {/* ---- CHANGED (C7): disable inputs during grace period ---- */}
+      <input
+        value={topic}
+        onChange={(e) => setTopic(e.target.value)}
+        placeholder="e.g. Monday mornings"
+        disabled={inGracePeriod}
+      />
+      {inGracePeriod ? (
+        <p>Time's up, submitting...</p>
+      ) : (
+        <button onClick={submit} style={{ color: '#000' }}>
+          {prep.submitted.recordLabel ? 'Update Topic' : 'Submit Topic'}
+        </button>
+      )}
+      {/* ---- CHANGED ABOVE (C7) ---- */}
       {prep.submitted.recordLabel && <p>Submitted ✓</p>}
     </div>
   );
@@ -52,40 +82,55 @@ function CoupletsInput({ code, prep, numCouplets }: { code: string; prep: PrepSt
   const [endings, setEndings] = useState<string[]>(
     prep.coupletEndings.length === numCouplets ? prep.coupletEndings : Array(numCouplets).fill('')
   );
-  const secondsLeft = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED (C7): destructure both values ----
+  const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
 
   const updateEnding = (i: number, value: string) => {
     setEndings((prev) => prev.map((e, idx) => (idx === i ? value : e)));
   };
 
+  // ---- CHANGED (C4): autoSubmitted.current set inside submit ----
   const submit = () => {
+    autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_COUPLETS:', { code, endings });
     socket.emit(SOCKET_EVENTS.SUBMIT_COUPLETS, { code, coupletEndings: endings });
   };
+  // ---- CHANGED ABOVE (C4) ----
 
+  // ---- CHANGED (C7): auto-submit after grace period ----
   useEffect(() => {
-    if (secondsLeft === 0 && !autoSubmitted.current) {
+    if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
       submit();
     }
-  }, [secondsLeft]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft, inGracePeriod]);
+  // ---- CHANGED ABOVE (C7) ----
 
   return (
     <div>
       <h2>Ghostwriter — write the couplet endings</h2>
+      {/* ---- CHANGED (C7): disable inputs during grace period ---- */}
       {endings.map((ending, i) => (
         <div key={i}>
           <input
             value={ending}
             onChange={(e) => updateEnding(i, e.target.value)}
             placeholder={`Line ${i + 1} ending`}
+            disabled={inGracePeriod}
           />
         </div>
       ))}
-      <button onClick={submit} style={{ color: '#000' }}>
-        {prep.submitted.ghostwriter ? 'Update Couplets' : 'Submit Couplets'}
-      </button>
+      {inGracePeriod ? (
+        <p>Time's up, submitting...</p>
+      ) : (
+        <button onClick={submit} style={{ color: '#000' }}>
+          {prep.submitted.ghostwriter ? 'Update Couplets' : 'Submit Couplets'}
+        </button>
+      )}
+      {/* ---- CHANGED ABOVE (C7) ---- */}
       {prep.submitted.ghostwriter && <p>Submitted ✓</p>}
     </div>
   );
@@ -93,94 +138,96 @@ function CoupletsInput({ code, prep, numCouplets }: { code: string; prep: PrepSt
 
 function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
   const [grid, setGrid] = useState<boolean[][]>(prep.beatGrid);
-  const secondsLeft = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED (C7): destructure both values ----
+  const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
+  // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
 
-  // ---- NEW: toggling a cell ON immediately plays that instrument once so
-  // the Producer gets audio feedback. Toggling OFF makes no sound since
-  // silence is already self-evident. playOnce is called inside the setGrid
-  // updater function (the (prev) => form) because that's where we have
-  // access to the new grid state to confirm the cell is now truly ON. ----
   const toggleCell = (row: number, col: number) => {
-  if (!grid[row]?.[col]) {
-    void playOnce(row);
-  }
-  setGrid((prev) =>
-    prev.map((r, ri) => r.map((cell, ci) => (ri === row && ci === col ? !cell : cell)))
-  );
-};
-  // ---- NEW ABOVE ----
+    // ---- CHANGED (C7): disable toggling during grace period ----
+    if (inGracePeriod) return;
+    // ---- CHANGED ABOVE (C7) ----
+    setGrid((prev) => {
+      const newGrid = prev.map((r, ri) => r.map((cell, ci) => (ri === row && ci === col ? !cell : cell)));
+      const cellIsNowOn = newGrid[row]?.[col] === true;
+      if (cellIsNowOn) {
+        void playOnce(row);
+      }
+      return newGrid;
+    });
+  };
 
+  // ---- CHANGED (C4): autoSubmitted.current set inside submit ----
   const submit = () => {
+    autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_BEAT:', { code });
     socket.emit(SOCKET_EVENTS.SUBMIT_BEAT, { code, beatGrid: grid });
   };
+  // ---- CHANGED ABOVE (C4) ----
 
-  // ---- NEW: plays one full loop of the current grid state immediately.
-  // All hits are scheduled up front before playback begins, so any grid
-  // changes made while the loop plays have no effect on the current preview. ----
   const handlePreview = () => {
     void previewLoop(grid);
   };
-  // ---- NEW ABOVE ----
 
-  // ---- NEW: stops any in-progress preview when the prep phase ends
-  // (component unmounts) so audio doesn't bleed into performance phase ----
+  // ---- CHANGED (C7): auto-submit after grace period ----
   useEffect(() => {
-    return () => {
-      stopPreview();
-    };
-  }, []);
-  // ---- NEW ABOVE ----
-  useEffect(() => {
-    if (secondsLeft === 0 && !autoSubmitted.current) {
+    if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
       submit();
     }
-  }, [secondsLeft]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft, inGracePeriod]);
+  // ---- CHANGED ABOVE (C7) ----
 
-  // Replace the BeatGrid return's outer div and button row:
-
-  // ---- FIX: centered the entire grid including instrument labels,
-  // and centered the Preview+Submit button row ----
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div>
       <h2>Producer — build the beat</h2>
-      <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
-        {grid.map((row, ri) => (
-          <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 90, textAlign: 'right' }}>{SAMPLES[ri]?.label ?? `Row ${ri + 1}`}</span>
-            {row.map((cell, ci) => (
-              <button
-                key={ci}
-                onClick={() => toggleCell(ri, ci)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  backgroundColor: cell ? '#4a90e2' : '#ddd',
-                  border: '1px solid #999',
-                }}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
-        <button onClick={handlePreview} style={{ color: '#000' }}>Preview</button>
-        <button onClick={submit} style={{ color: '#000' }}>
-          {prep.submitted.producer ? 'Update Beat' : 'Submit Beat'}
+      {grid.map((row, ri) => (
+        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 90 }}>{SAMPLES[ri]?.label ?? `Row ${ri + 1}`}</span>
+          {row.map((cell, ci) => (
+            <button
+              key={ci}
+              onClick={() => toggleCell(ri, ci)}
+              // ---- CHANGED (C7): disable grid cells during grace period ----
+              disabled={inGracePeriod}
+              // ---- CHANGED ABOVE (C7) ----
+              style={{
+                width: 32,
+                height: 32,
+                backgroundColor: cell ? '#4a90e2' : '#ddd',
+                border: '1px solid #999',
+              }}
+            />
+          ))}
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        {/* ---- CHANGED (C7): disable Preview and Submit during grace period ---- */}
+        <button onClick={handlePreview} style={{ color: '#000' }} disabled={inGracePeriod}>
+          Preview
         </button>
+        {inGracePeriod ? (
+          <p>Time's up, submitting...</p>
+        ) : (
+          <button onClick={submit} style={{ color: '#000' }}>
+            {prep.submitted.producer ? 'Update Beat' : 'Submit Beat'}
+          </button>
+        )}
+        {/* ---- CHANGED ABOVE (C7) ---- */}
       </div>
       {prep.submitted.producer && <p>Submitted ✓</p>}
     </div>
   );
-  // ---- FIX ABOVE ----
 }
 
 function PrepPhase({ room, myRole }: { room: RoomPublic; myRole: string | null }) {
-  const secondsLeft = useCountdown(room.prep?.prepEndsAt);
+  // ---- CHANGED (A2+A3): room.rapBattle?.prepState instead of room.prep ----
+  const prepState = room.rapBattle?.prepState;
+  const { secondsLeft } = useCountdown(prepState?.prepEndsAt);
+  // ---- CHANGED ABOVE (A2+A3) ----
 
-  if (!room.prep) {
+  if (!prepState) {
     return <p>Loading prep phase...</p>;
   }
 
@@ -189,19 +236,19 @@ function PrepPhase({ room, myRole }: { room: RoomPublic; myRole: string | null }
       <h1>Room: {room.code}</h1>
       <p>Time left: {secondsLeft}s</p>
 
-      {myRole === 'record-label' && <TopicInput code={room.code} prep={room.prep} />}
+      {myRole === 'record-label' && <TopicInput code={room.code} prep={prepState} />}
       {myRole === 'ghostwriter' && (
-        <CoupletsInput code={room.code} prep={room.prep} numCouplets={room.numCouplets} />
+        <CoupletsInput code={room.code} prep={prepState} numCouplets={room.numCouplets} />
       )}
-      {myRole === 'producer' && <BeatGrid code={room.code} prep={room.prep} />}
+      {myRole === 'producer' && <BeatGrid code={room.code} prep={prepState} />}
 
       {myRole === 'rapper' && (
         <div>
           <h2>Waiting on your team...</h2>
           <ul>
-            <li>Record Label (topic): {room.prep.submitted.recordLabel ? '✓ Submitted' : 'Waiting...'}</li>
-            <li>Ghostwriter (couplets): {room.prep.submitted.ghostwriter ? '✓ Submitted' : 'Waiting...'}</li>
-            <li>Producer (beat): {room.prep.submitted.producer ? '✓ Submitted' : 'Waiting...'}</li>
+            <li>Record Label (topic): {prepState.submitted.recordLabel ? '✓ Submitted' : 'Waiting...'}</li>
+            <li>Ghostwriter (couplets): {prepState.submitted.ghostwriter ? '✓ Submitted' : 'Waiting...'}</li>
+            <li>Producer (beat): {prepState.submitted.producer ? '✓ Submitted' : 'Waiting...'}</li>
           </ul>
         </div>
       )}

@@ -1,16 +1,16 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
-import { type RoomPublic, LOOP_MS } from '../../shared/events';
+// ---- CHANGED (A1): RoomPublic from types; LOOP_MS from constants ----
+import type { RoomPublic } from '../../shared/types';
+import { LOOP_MS } from '../../shared/constants';
+// ---- CHANGED ABOVE (A1) ----
 import { schedulePlayback } from './audio';
 
-// ---- CHANGED: active line now shows "____________ WORD" where only the word
-// has a red background — underscores are plain text, word is highlighted.
-// inactive (preview) line shows the same layout but smaller and grey. ----
-function lineContainerStyle(active: boolean): CSSProperties {
+function lineContainerStyle(_active: boolean): CSSProperties {
   return {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: active ? 12 : 8,
+    gap: 12,
     transition: 'all 0.3s ease',
   };
 }
@@ -40,9 +40,7 @@ function wordStyle(active: boolean): CSSProperties {
     transition: 'all 0.3s ease',
   };
 }
-// ---- CHANGED ABOVE ----
 
-// ---- CHANGED: topic now displayed larger with the actual topic word in green ----
 function topicStyle(): CSSProperties {
   return {
     fontSize: 28,
@@ -55,26 +53,31 @@ function topicStyle(): CSSProperties {
 
 function topicWordStyle(): CSSProperties {
   return {
-    color: '#4caf50', // green text, no background
+    color: '#4caf50',
     fontWeight: 900,
     fontSize: 36,
   };
 }
-// ---- CHANGED ABOVE ----
 
 function PerformancePhase({ room }: { room: RoomPublic }) {
   const [lineIndex, setLineIndex] = useState(0);
   const audioStarted = useRef(false);
 
-  const topic = room.prep?.topic ?? '';
-  const coupletEndings = room.prep?.coupletEndings ?? [];
-  const startAt = room.performance?.startAt;
+  // ---- CHANGED (A2+A3): rapBattle.prepState and rapBattle.performanceState ----
+  const rapBattle = room.rapBattle;
+  const topic = rapBattle?.prepState?.topic ?? '';
+  const coupletEndings = rapBattle?.prepState?.coupletEndings ?? [];
+  const startAt = rapBattle?.performanceState?.startAt;
+  const isGrace = rapBattle?.phase === 'grace';
+  // ---- CHANGED ABOVE (A2+A3) ----
 
   useEffect(() => {
-    if (!startAt || !room.prep || audioStarted.current) return;
+    // ---- CHANGED (A2+D1): only schedule audio once we're out of grace and have prep data ----
+    if (!startAt || !rapBattle?.prepState || audioStarted.current || isGrace) return;
+    // ---- CHANGED ABOVE (A2+D1) ----
     audioStarted.current = true;
-    void schedulePlayback(room.prep.beatGrid, startAt, room.numCouplets);
-  }, [startAt]);
+    void schedulePlayback(rapBattle.prepState.beatGrid, startAt, room.numCouplets);
+  }, [startAt, isGrace]);
 
   useEffect(() => {
     if (!startAt) return;
@@ -100,11 +103,28 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
     };
   }, [startAt, room.numCouplets]);
 
+  // ---- CHANGED (D1): show a "Get ready..." state during the grace/buffer window ----
+  if (isGrace) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80vh',
+          gap: 24,
+        }}
+      >
+        <h2 style={{ color: '#ccc', fontSize: 32 }}>Get ready...</h2>
+      </div>
+    );
+  }
+  // ---- CHANGED ABOVE (D1) ----
+
   const topLine = coupletEndings[lineIndex];
   const bottomLine = coupletEndings[lineIndex + 1];
 
-  // ---- CHANGED: renders "____________ WORD" layout with separate spans
-  // so the red background only sits behind the word, not the underscores ----
   const renderLine = (word: string | undefined, active: boolean) => {
     if (!word) return null;
     return (
@@ -114,7 +134,6 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
       </div>
     );
   };
-  // ---- CHANGED ABOVE ----
 
   return (
     <div
@@ -127,12 +146,9 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
         gap: 40,
       }}
     >
-      {/* ---- CHANGED: topic split into label + word so the word itself
-          can be styled separately in green ---- */}
       <p style={topicStyle()}>
         Topic: <span style={topicWordStyle()}>{topic}</span>
       </p>
-      {/* ---- CHANGED ABOVE ---- */}
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28 }}>
         {renderLine(topLine, true)}

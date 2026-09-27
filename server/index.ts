@@ -1,13 +1,23 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
-// ---- CHANGED: added returnToLobby to imports ----
-import { createRoom, getRoom, joinRoom, rejoinRoom, assignRoles, toPublicRoom, leaveRoom, handleDisconnect, submitTopic, submitBeat, submitCouplets, returnToLobby } from './rooms.js';
-// ---- CHANGED ABOVE ----
+// ---- CHANGED (A1): imports split across new shared files ----
+// ---- CHANGED (B2): assignRoles → startGame ----
+import {
+  createRoom, getRoom, joinRoom, rejoinRoom,
+  startGame,   // ---- CHANGED (B2) ----
+  toPublicRoom, leaveRoom, handleDisconnect,
+  submitTopic, submitBeat, submitCouplets,
+  returnToLobby, submitFrame, submitCaption, submitVote,
+  submitComment, submitCommentVote,
+} from './rooms.js';
 import { SOCKET_EVENTS } from '../shared/events.js';
+import type { GameMode } from '../shared/types.js';
+// ---- CHANGED ABOVE (A1) ----
 
 const app = express();
 app.use(express.static('../client/dist'));
+
 app.get('*path', (_req, res) => {
   res.sendFile('index.html', { root: '../client/dist' });
 });
@@ -20,10 +30,9 @@ const io = new Server(httpServer, {
 io.on('connection', (socket: Socket) => {
   console.log('[server] socket connected:', socket.id);
 
-  socket.on(SOCKET_EVENTS.CREATE_ROOM, ({ name }: { name: string }) => {
-    const result = createRoom(name, socket.id);
+  socket.on(SOCKET_EVENTS.CREATE_ROOM, ({ name, mode }: { name: string; mode: GameMode }) => {
+    const result = createRoom(name, socket.id, mode);
     if ('error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
@@ -35,7 +44,6 @@ io.on('connection', (socket: Socket) => {
   socket.on(SOCKET_EVENTS.JOIN_ROOM, ({ code, name }: { code: string; name: string }) => {
     const result = joinRoom(code, name, socket.id);
     if ('error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
@@ -50,7 +58,6 @@ io.on('connection', (socket: Socket) => {
     ({ playerId, roomCode }: { playerId: string; roomCode: string }) => {
       const result = rejoinRoom(roomCode, playerId, socket.id);
       if ('error' in result) {
-        console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
         socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
         return;
       }
@@ -64,17 +71,16 @@ io.on('connection', (socket: Socket) => {
     socket.leave(code);
     const result = leaveRoom(code, playerId);
     if (result && 'error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
     if (result) {
       io.to(result.code).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(result));
     }
-    // if result is undefined the room just emptied out — nobody left to notify
   });
 
   socket.on('disconnect', () => {
+    // Note: 'disconnect' is Socket.IO's own built-in event — not in SOCKET_EVENTS (D4)
     console.log('[server] socket disconnected:', socket.id);
     handleDisconnect(socket.id, (roomCode, room) => {
       io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(room));
@@ -84,19 +90,21 @@ io.on('connection', (socket: Socket) => {
   socket.on(SOCKET_EVENTS.START_GAME, ({ code }: { code: string }) => {
     const room = getRoom(code);
     if (!room) {
-      console.error(`[server] emitting error to ${socket.id}: Room not found.`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: 'Room not found.' });
       return;
     }
 
-    const result = assignRoles(room, (roomCode) => {
-      const finishedRoom = getRoom(roomCode);
-      if (finishedRoom) {
-        io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(finishedRoom));
+    // ---- CHANGED (B2): startGame replaces assignRoles ----
+    // ---- CHANGED (B3): broadcastRoom callback replaces onPhaseChange ----
+    const result = startGame(room, (roomCode) => {
+      const updatedRoom = getRoom(roomCode);
+      if (updatedRoom) {
+        io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(updatedRoom));
       }
     });
+    // ---- CHANGED ABOVE (B2+B3) ----
+
     if (result && 'error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
@@ -107,7 +115,6 @@ io.on('connection', (socket: Socket) => {
   socket.on(SOCKET_EVENTS.SUBMIT_TOPIC, ({ code, topic }: { code: string; topic: string }) => {
     const result = submitTopic(code, topic);
     if ('error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
@@ -119,7 +126,6 @@ io.on('connection', (socket: Socket) => {
     ({ code, coupletEndings }: { code: string; coupletEndings: string[] }) => {
       const result = submitCouplets(code, coupletEndings);
       if ('error' in result) {
-        console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
         socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
         return;
       }
@@ -132,7 +138,6 @@ io.on('connection', (socket: Socket) => {
     ({ code, beatGrid }: { code: string; beatGrid: boolean[][] }) => {
       const result = submitBeat(code, beatGrid);
       if ('error' in result) {
-        console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
         socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
         return;
       }
@@ -140,20 +145,84 @@ io.on('connection', (socket: Socket) => {
     }
   );
 
-  // ---- NEW: resets the room back to lobby (same players, roles cleared,
-  // prep/performance wiped) so the host can start a fresh round. Any player
-  // can trigger this from the round-end screen. ----
   socket.on(SOCKET_EVENTS.RETURN_TO_LOBBY, ({ code }: { code: string }) => {
     const result = returnToLobby(code);
     if ('error' in result) {
-      console.error(`[server] emitting error to ${socket.id}: ${result.error}`);
       socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
       return;
     }
     io.to(code).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(result));
   });
-  // ---- NEW ABOVE ----
 
+  socket.on(
+    SOCKET_EVENTS.SUBMIT_FRAME,
+    ({ code, playerId, frameBase64 }: { code: string; playerId: string; frameBase64: string }) => {
+      console.log(`[server] SUBMIT_FRAME from ${playerId} in room ${code}`);
+      const result = submitFrame(code, playerId, frameBase64);
+      if ('error' in result) {
+        socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
+        return;
+      }
+      io.to(code).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(result));
+    }
+  );
+
+  socket.on(
+    SOCKET_EVENTS.SUBMIT_CAPTION,
+    ({ code, playerId, text }: { code: string; playerId: string; text: string }) => {
+      console.log(`[server] SUBMIT_CAPTION from ${playerId} in room ${code}`);
+      const result = submitCaption(code, playerId, text);
+      if ('error' in result) {
+        socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
+        return;
+      }
+      io.to(code).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(result));
+    }
+  );
+
+  socket.on(
+    SOCKET_EVENTS.SUBMIT_VOTE,
+    ({ code, playerId, vote }: { code: string; playerId: string; vote: 'A' | 'B' }) => {
+      console.log(`[server] SUBMIT_VOTE from ${playerId} in room ${code}: ${vote}`);
+      const result = submitVote(code, playerId, vote);
+      if ('error' in result) {
+        socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
+        return;
+      }
+      io.to(code).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(result));
+    }
+  );
+
+  socket.on(
+    SOCKET_EVENTS.SUBMIT_COMMENT,
+    ({ code, playerId, text }: { code: string; playerId: string; text: string }) => {
+      console.log(`[server] SUBMIT_COMMENT from ${playerId} in room ${code}`);
+      const result = submitComment(code, playerId, text);
+      if ('error' in result) {
+        socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
+        return;
+      }
+      io.to(code).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(result));
+    }
+  );
+
+  socket.on(
+    SOCKET_EVENTS.SUBMIT_COMMENT_VOTE,
+    ({ code, voterId, targetPlayerId, vote }: {
+      code: string;
+      voterId: string;
+      targetPlayerId: string;
+      vote: 'up' | 'down' | null;
+    }) => {
+      console.log(`[server] SUBMIT_COMMENT_VOTE from ${voterId} on ${targetPlayerId} in room ${code}: ${vote}`);
+      const result = submitCommentVote(code, voterId, targetPlayerId, vote);
+      if ('error' in result) {
+        socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
+        return;
+      }
+      io.to(code).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(result));
+    }
+  );
 });
 
 const PORT: number = 3000;
