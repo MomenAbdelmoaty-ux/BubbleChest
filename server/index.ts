@@ -27,6 +27,22 @@ const io = new Server(httpServer, {
   cors: { origin: '*' }
 });
 
+// ---- NEW: named broadcast helpers so the same logic isn't repeated inline
+// every time rooms.ts needs to push a phase transition to clients.
+// broadcastRoomUpdate  → used by rap-battle flow (ROOM_UPDATE event)
+// broadcastGame2Update → used by gamemode-2 flow (GAME2_UPDATE event)
+// Both follow the same pattern: look up the latest room state and emit it. ----
+function broadcastRoomUpdate(roomCode: string): void {
+  const room = getRoom(roomCode);
+  if (room) io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(room));
+}
+
+function broadcastGame2Update(roomCode: string): void {
+  const room = getRoom(roomCode);
+  if (room) io.to(roomCode).emit(SOCKET_EVENTS.GAME2_UPDATE, toPublicRoom(room));
+}
+// ---- NEW ABOVE ----
+
 io.on('connection', (socket: Socket) => {
   console.log('[server] socket connected:', socket.id);
 
@@ -96,12 +112,8 @@ io.on('connection', (socket: Socket) => {
 
     // ---- CHANGED (B2): startGame replaces assignRoles ----
     // ---- CHANGED (B3): broadcastRoom callback replaces onPhaseChange ----
-    const result = startGame(room, (roomCode) => {
-      const updatedRoom = getRoom(roomCode);
-      if (updatedRoom) {
-        io.to(roomCode).emit(SOCKET_EVENTS.ROOM_UPDATE, toPublicRoom(updatedRoom));
-      }
-    });
+    // ---- CHANGED: inline callback replaced with broadcastRoomUpdate helper ----
+    const result = startGame(room, broadcastRoomUpdate);
     // ---- CHANGED ABOVE (B2+B3) ----
 
     if (result && 'error' in result) {
@@ -158,7 +170,10 @@ io.on('connection', (socket: Socket) => {
     SOCKET_EVENTS.SUBMIT_FRAME,
     ({ code, playerId, frameBase64 }: { code: string; playerId: string; frameBase64: string }) => {
       console.log(`[server] SUBMIT_FRAME from ${playerId} in room ${code}`);
-      const result = submitFrame(code, playerId, frameBase64);
+      // ---- CHANGED: pass broadcastGame2Update so phase transitions triggered by early
+      // frame submission (caption, voting, commenting, results) are broadcast to clients ----
+      const result = submitFrame(code, playerId, frameBase64, broadcastGame2Update);
+      // ---- CHANGED ABOVE ----
       if ('error' in result) {
         socket.emit(SOCKET_EVENTS.ERROR, { message: result.error });
         return;

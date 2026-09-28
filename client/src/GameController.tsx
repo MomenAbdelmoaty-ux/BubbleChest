@@ -7,15 +7,24 @@ import { SOCKET_EVENTS } from '../../shared/events';
 import type { RoomPublic } from '../../shared/types';
 // ---- NEW ABOVE (A1) ----
 import { socket } from './socket';
+import { useError } from './ErrorContext';
 import LobbyScreen from './LobbyScreen';
 import RapBattle from './RapBattle';
 import RoundEnd from './RoundEnd';
 import Game2 from './Game2';
 
+// ---- NEW: single source of error display — rendered once at the bottom of every screen ----
+function ErrorBanner() {
+  const { error } = useError();
+  if (!error) return null;
+  return <p style={{ color: 'red' }}>{error}</p>;
+}
+// ---- NEW ABOVE ----
+
 export default function GameController() {
   const [room, setRoom] = useState<RoomPublic | null>(null);
   const [myPlayerId, setMyPlayerId] = useState('');
-  const [error, setError] = useState('');
+  const { setError } = useError();
 
   // Rejoin on mount if session data is present
   useEffect(() => {
@@ -38,11 +47,6 @@ export default function GameController() {
         sessionStorage.setItem('playerId', data.yourPlayerId);
         sessionStorage.setItem('roomCode', data.code);
       }
-      // Clear room on leave (null yourPlayerId signals a lobby reset for this client)
-      //if (!data.yourPlayerId && !myPlayerId) {
-        //setRoom(null);
-        //setMyPlayerId('');
-      //}
     });
 
     socket.on(SOCKET_EVENTS.ROLES_ASSIGNED, (data: RoomPublic) => {
@@ -75,7 +79,6 @@ export default function GameController() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle leave: when LobbyScreen calls handleLeave, clear local state too
   const handleRoomCleared = () => {
     setRoom(null);
     setMyPlayerId('');
@@ -90,7 +93,7 @@ export default function GameController() {
       return (
         <>
           <RapBattle room={room} myRole={myRole} />
-          {error && <p style={{ color: 'red' }}>{error}</p>}
+          <ErrorBanner />
         </>
       );
     }
@@ -98,7 +101,7 @@ export default function GameController() {
       return (
         <>
           <Game2 room={room} myPlayerId={myPlayerId} />
-          {error && <p style={{ color: 'red' }}>{error}</p>}
+          <ErrorBanner />
         </>
       );
     }
@@ -108,22 +111,21 @@ export default function GameController() {
     return (
       <>
         <RoundEnd room={room} />
-        {error && <p style={{ color: 'red' }}>{error}</p>}
+        <ErrorBanner />
       </>
     );
   }
   // ---- CHANGED ABOVE (A4+C2) ----
 
-  // lobby status (or null room) — show create/join UI
   return (
-    // ---- CHANGED: pass onRoomCleared so LobbyScreen can signal a leave ----
-    <LobbyScreen
-      room={room}
-      myPlayerId={myPlayerId}
-      error={error}
-      onRoomCleared={handleRoomCleared}
-    />
-    // ---- CHANGED ABOVE ----
+    <>
+      <LobbyScreen
+        room={room}
+        myPlayerId={myPlayerId}
+        onRoomCleared={handleRoomCleared}
+      />
+      <ErrorBanner />
+    </>
   );
 }
 // ---- NEW ABOVE (C1+C8) ----

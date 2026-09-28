@@ -466,7 +466,16 @@ function autoAdvanceFrame(room: Room, broadcastRoom: (roomCode: string) => void)
   // ---- CHANGED ABOVE (A5) ----
 }
 
-export function submitFrame(roomCode: string, playerId: string, frameBase64: string): Room | { error: string } {
+// ---- CHANGED: broadcastRoom added so autoAdvanceFrame → startGame2Caption can broadcast
+// phase transitions (caption, voting, commenting, results) that are triggered by early
+// frame submission. Previously () => {} was passed, silently swallowing all downstream
+// phase-change broadcasts — the root cause of clients being stuck on 'caption' forever. ----
+export function submitFrame(
+  roomCode: string,
+  playerId: string,
+  frameBase64: string,
+  broadcastRoom: (roomCode: string) => void,
+): Room | { error: string } {
   const room = getRoom(roomCode);
   if (!room) return { error: 'Room not found.' };
   // ---- CHANGED (A3): game2State.drawState (was game2.draw) ----
@@ -481,9 +490,12 @@ export function submitFrame(roomCode: string, playerId: string, frameBase64: str
   draw.frames[draw.currentDrawerIndex] = frameBase64;
   console.log(`[rooms] Room ${roomCode}: frame ${draw.currentDrawerIndex} submitted by ${playerId}`);
 
-  autoAdvanceFrame(room, () => {});
+  // ---- CHANGED: pass real broadcastRoom so all downstream phase transitions are emitted ----
+  autoAdvanceFrame(room, broadcastRoom);
+  // ---- CHANGED ABOVE ----
   return room;
 }
+// ---- CHANGED ABOVE ----
 
 // ---- CHANGED (B3): broadcastRoom parameter renamed ----
 // ---- CHANGED (A3): game2State.captionState (was game2.caption) ----
@@ -542,10 +554,7 @@ function buildBracket(captions: Record<string, string>): BracketMatchup[][] {
       // ---- CHANGED (A6): null until tallied ----
       winner: null,
       // ---- CHANGED ABOVE (A6) ----
-      // ---- CHANGED: phaseEndsAt is the player-facing deadline (GAME2_VOTE_ROUND_MS + INPUT_GRACE_MS);
-      // the server timer fires SERVER_BUFFER_MS after that, matching every other submission phase ----
-      phaseEndsAt: now + GAME2_VOTE_ROUND_MS + INPUT_GRACE_MS,
-      // ---- CHANGED ABOVE ----
+      phaseEndsAt: now + GAME2_VOTE_ROUND_MS,
     });
   }
 
@@ -662,9 +671,7 @@ function advanceMatchup(room: Room, broadcastRoom: (roomCode: string) => void): 
     vote.currentMatchup = nextMatchupIndex;
 
     const nextMatchup = currentMatchups[nextMatchupIndex]!;
-    // ---- CHANGED: include INPUT_GRACE_MS so client deadline matches other submission phases ----
-    nextMatchup.phaseEndsAt = Date.now() + GAME2_VOTE_ROUND_MS + INPUT_GRACE_MS;
-    // ---- CHANGED ABOVE ----
+    nextMatchup.phaseEndsAt = Date.now() + GAME2_VOTE_ROUND_MS;
 
     broadcastRoom(room.code);
     scheduleNextMatchupTimer(room, broadcastRoom);
@@ -706,9 +713,7 @@ function advanceMatchup(room: Room, broadcastRoom: (roomCode: string) => void): 
           // ---- CHANGED (A6): null sentinel ----
           winner: null,
           // ---- CHANGED ABOVE (A6) ----
-          // ---- CHANGED: include INPUT_GRACE_MS so client deadline matches other submission phases ----
-          phaseEndsAt: Date.now() + GAME2_VOTE_ROUND_MS + INPUT_GRACE_MS,
-          // ---- CHANGED ABOVE ----
+          phaseEndsAt: Date.now() + GAME2_VOTE_ROUND_MS,
         });
       }
 
@@ -789,16 +794,13 @@ function openCommentVoting(room: Room, votingMs: number, broadcastRoom: (roomCod
   // ---- CHANGED ABOVE (A3) ----
   if (!comment) return;
 
-  // ---- CHANGED: votingEndsAt is the player-facing deadline; server fires INPUT_GRACE_MS + SERVER_BUFFER_MS
-  // after that, matching the pattern used by every other submission phase ----
-  comment.votingEndsAt = Date.now() + votingMs + INPUT_GRACE_MS;
+  comment.votingEndsAt = Date.now() + votingMs;
   console.log(`[rooms] Room ${room.code}: comment voting open for ${votingMs}ms`);
   broadcastRoom(room.code);
 
-  scheduleGame2Timer(room.code, votingMs + INPUT_GRACE_MS + SERVER_BUFFER_MS, () => {
+  scheduleGame2Timer(room.code, votingMs, () => {
     resolveCommentWinner(room, broadcastRoom);
   });
-  // ---- CHANGED ABOVE ----
 }
 
 // ---- CHANGED (A6+B7): winnerPlayerIds (array) supports multi-way ties in comments ----

@@ -3,9 +3,19 @@ import { SOCKET_EVENTS } from '../../shared/events';
 import type { RoomPublic } from '../../shared/types';
 // ---- CHANGED ABOVE (A1) ----
 import { socket } from './socket';
+// ---- CHANGED: import useError so return-to-lobby clears stale errors ----
+import { useError } from './ErrorContext';
+// ---- CHANGED ABOVE ----
 
 function RoundEnd({ room }: { room: RoomPublic }) {
+  // ---- CHANGED: clearError on user action ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
+
   const handleReturnToLobby = () => {
+    // ---- CHANGED: clear error before emitting ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting RETURN_TO_LOBBY:', { code: room.code });
     socket.emit(SOCKET_EVENTS.RETURN_TO_LOBBY, { code: room.code });
   };

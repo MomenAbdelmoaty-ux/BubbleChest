@@ -6,6 +6,9 @@ import { INPUT_GRACE_MS } from '../../shared/constants';
 // ---- CHANGED ABOVE (A1) ----
 import { socket } from './socket';
 import { SAMPLES, playOnce, previewLoop } from './audio';
+// ---- CHANGED: import useError so submit handlers can clear stale errors ----
+import { useError } from './ErrorContext';
+// ---- CHANGED ABOVE ----
 
 // ---- CHANGED (C7): useCountdown now also tracks the INPUT_GRACE_MS window after time is up ----
 function useCountdown(endsAt: number | undefined) {
@@ -35,10 +38,16 @@ function TopicInput({ code, prep }: { code: string; prep: PrepState }) {
   const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
   // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
+  // ---- CHANGED: clearError on manual submit ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   // ---- CHANGED (C4): autoSubmitted.current = true set inside submit() so a
   // manual submit prevents the auto-submit from also firing ----
-  const submit = () => {
+  const submit = (manual = false) => {
+    // ---- CHANGED: only clear error on manual submit, not auto-submit ----
+    if (manual) clearError();
+    // ---- CHANGED ABOVE ----
     autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_TOPIC:', { code, topic });
     socket.emit(SOCKET_EVENTS.SUBMIT_TOPIC, { code, topic });
@@ -49,7 +58,7 @@ function TopicInput({ code, prep }: { code: string; prep: PrepState }) {
   useEffect(() => {
     if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
-      submit();
+      submit(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, inGracePeriod]);
@@ -68,7 +77,7 @@ function TopicInput({ code, prep }: { code: string; prep: PrepState }) {
       {inGracePeriod ? (
         <p>Time's up, submitting...</p>
       ) : (
-        <button onClick={submit} style={{ color: '#000' }}>
+        <button onClick={() => submit(true)} style={{ color: '#000' }}>
           {prep.submitted.recordLabel ? 'Update Topic' : 'Submit Topic'}
         </button>
       )}
@@ -86,13 +95,19 @@ function CoupletsInput({ code, prep, numCouplets }: { code: string; prep: PrepSt
   const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
   // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
+  // ---- CHANGED: clearError on manual submit ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   const updateEnding = (i: number, value: string) => {
     setEndings((prev) => prev.map((e, idx) => (idx === i ? value : e)));
   };
 
   // ---- CHANGED (C4): autoSubmitted.current set inside submit ----
-  const submit = () => {
+  const submit = (manual = false) => {
+    // ---- CHANGED: only clear error on manual submit ----
+    if (manual) clearError();
+    // ---- CHANGED ABOVE ----
     autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_COUPLETS:', { code, endings });
     socket.emit(SOCKET_EVENTS.SUBMIT_COUPLETS, { code, coupletEndings: endings });
@@ -103,7 +118,7 @@ function CoupletsInput({ code, prep, numCouplets }: { code: string; prep: PrepSt
   useEffect(() => {
     if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
-      submit();
+      submit(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, inGracePeriod]);
@@ -126,7 +141,7 @@ function CoupletsInput({ code, prep, numCouplets }: { code: string; prep: PrepSt
       {inGracePeriod ? (
         <p>Time's up, submitting...</p>
       ) : (
-        <button onClick={submit} style={{ color: '#000' }}>
+        <button onClick={() => submit(true)} style={{ color: '#000' }}>
           {prep.submitted.ghostwriter ? 'Update Couplets' : 'Submit Couplets'}
         </button>
       )}
@@ -142,6 +157,9 @@ function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
   const { secondsLeft, inGracePeriod } = useCountdown(prep.prepEndsAt);
   // ---- CHANGED ABOVE (C7) ----
   const autoSubmitted = useRef(false);
+  // ---- CHANGED: clearError on manual submit ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   const toggleCell = (row: number, col: number) => {
     // ---- CHANGED (C7): disable toggling during grace period ----
@@ -158,7 +176,10 @@ function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
   };
 
   // ---- CHANGED (C4): autoSubmitted.current set inside submit ----
-  const submit = () => {
+  const submit = (manual = false) => {
+    // ---- CHANGED: only clear error on manual submit ----
+    if (manual) clearError();
+    // ---- CHANGED ABOVE ----
     autoSubmitted.current = true;
     console.log('[client] emitting SUBMIT_BEAT:', { code });
     socket.emit(SOCKET_EVENTS.SUBMIT_BEAT, { code, beatGrid: grid });
@@ -173,7 +194,7 @@ function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
   useEffect(() => {
     if (secondsLeft === 0 && !inGracePeriod && !autoSubmitted.current) {
       autoSubmitted.current = true;
-      submit();
+      submit(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, inGracePeriod]);
@@ -210,7 +231,7 @@ function BeatGrid({ code, prep }: { code: string; prep: PrepState }) {
         {inGracePeriod ? (
           <p>Time's up, submitting...</p>
         ) : (
-          <button onClick={submit} style={{ color: '#000' }}>
+          <button onClick={() => submit(true)} style={{ color: '#000' }}>
             {prep.submitted.producer ? 'Update Beat' : 'Submit Beat'}
           </button>
         )}

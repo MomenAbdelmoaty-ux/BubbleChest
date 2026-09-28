@@ -10,6 +10,9 @@ import { GAME2_FPS, GAME2_TEXT_MAX_LEN } from '../../shared/constants';
 // ---- CHANGED ABOVE (A1) ----
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from './socket';
+// ---- CHANGED: import useError so every manual submit handler can clear stale errors ----
+import { useError } from './ErrorContext';
+// ---- CHANGED ABOVE ----
 
 // ---- Countdown hook ----
 function useCountdown(endsAt: number | undefined | null) {
@@ -74,6 +77,9 @@ function DrawingCanvas({
   const undoStackRef = useRef<string[]>([]);
   const secondsLeft = useCountdown(phaseEndsAt);
   const autoSubmitted = useRef(false);
+  // ---- CHANGED: clearError for manual submit ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   // ---- CHANGED (D3): use getCanvasSize() instead of repeating the formula ----
   const canvasSize = getCanvasSize();
@@ -131,13 +137,16 @@ function DrawingCanvas({
     const stopDrawing = () => {
       if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
-      // ---- CHANGED (C6): route through pushSnapshot instead of direct shift/push ----
       pushSnapshot(canvas.toDataURL('image/png'));
-      // ---- CHANGED ABOVE (C6) ----
     };
 
-    const onMouseDown = (e: MouseEvent) => startDrawing(e.offsetX, e.offsetY);
-    const onMouseMove = (e: MouseEvent) => draw(e.offsetX, e.offsetY);
+    const getPos = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const onMouseDown = (e: MouseEvent) => { const p = getPos(e); startDrawing(p.x, p.y); };
+    const onMouseMove = (e: MouseEvent) => { const p = getPos(e); draw(p.x, p.y); };
     const onMouseUp = () => stopDrawing();
     const onWindowMouseUp = () => stopDrawing();
 
@@ -146,8 +155,8 @@ function DrawingCanvas({
     canvas.addEventListener('mouseup', onMouseUp);
     window.addEventListener('mouseup', onWindowMouseUp);
 
-    (canvas as unknown as { _colorRef: typeof colorRef })._colorRef = colorRef;
-    (canvas as unknown as { _brushRef: typeof brushRef })._brushRef = brushRef;
+    (canvas as unknown as { _colorRef: typeof colorRef; _brushRef: typeof brushRef })._colorRef = colorRef;
+    (canvas as unknown as { _colorRef: typeof colorRef; _brushRef: typeof brushRef })._brushRef = brushRef;
 
     return () => {
       canvas.removeEventListener('mousedown', onMouseDown);
@@ -171,6 +180,7 @@ function DrawingCanvas({
     if (secondsLeft === 0 && !autoSubmitted.current) {
       autoSubmitted.current = true;
       const canvas = canvasRef.current;
+      // ---- note: no clearError here — auto-submit, not user-initiated ----
       if (canvas) onSubmit(canvas.toDataURL('image/png'));
     }
   }, [secondsLeft, onSubmit]);
@@ -213,7 +223,6 @@ function DrawingCanvas({
     const img = new Image();
     img.onload = () => {
       ctx.drawImage(img, 0, 0, canvasSize, canvasSize);
-      // Push a copy of the floor so the reset itself is undoable
       pushSnapshot(canvas.toDataURL('image/png'));
     };
     img.src = floor;
@@ -221,6 +230,9 @@ function DrawingCanvas({
   // ---- CHANGED ABOVE (C6) ----
 
   const handleSubmit = () => {
+    // ---- CHANGED: clear error on manual submit ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     const canvas = canvasRef.current;
     if (!canvas) return;
     onSubmit(canvas.toDataURL('image/png'));
@@ -239,17 +251,10 @@ function DrawingCanvas({
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {previousFrame && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <p style={{ margin: 0, fontSize: 12, color: '#888' }}>Previous frame</p>
-            <img
-              src={previousFrame}
-              width={canvasSize}
-              height={canvasSize}
-              style={{ border: '1px solid #ccc' }}
-              alt="previous frame"
-            />
+            <p style={{ fontSize: 12, color: '#888' }}>Previous frame</p>
+            <img src={previousFrame} width={canvasSize} height={canvasSize} style={{ opacity: 0.4, border: '1px solid #ccc' }} alt="previous frame" />
           </div>
         )}
-
         <canvas
           ref={canvasRef}
           width={canvasSize}
@@ -258,14 +263,14 @@ function DrawingCanvas({
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
         {palette.map((c) => (
           <button
             key={c}
             onClick={() => setColor(c)}
             style={{
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               backgroundColor: c,
               border: color === c ? '3px solid #4a90e2' : '2px solid #999',
               borderRadius: 4,
@@ -392,8 +397,14 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   const secondsLeft = useCountdown(caption?.phaseEndsAt);
   const autoSubmitted = useRef(false);
   const submitted = caption?.captions[myPlayerId] !== undefined;
+  // ---- CHANGED: clearError on manual submit ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
-  const handleSubmit = () => {
+  const handleSubmit = (manual = false) => {
+    // ---- CHANGED: only clear error on manual submit, not auto-submit ----
+    if (manual) clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting SUBMIT_CAPTION');
     socket.emit(SOCKET_EVENTS.SUBMIT_CAPTION, {
       code: room.code,
@@ -405,7 +416,7 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   useEffect(() => {
     if (secondsLeft === 0 && !autoSubmitted.current) {
       autoSubmitted.current = true;
-      handleSubmit();
+      handleSubmit(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft]);
@@ -431,7 +442,7 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
       />
       <p style={{ fontSize: 12, color: '#888' }}>{text.length}/{GAME2_TEXT_MAX_LEN}</p>
       {/* ---- CHANGED ABOVE (B9) ---- */}
-      <button onClick={handleSubmit} style={{ color: '#000' }}>
+      <button onClick={() => handleSubmit(true)} style={{ color: '#000' }}>
         {submitted ? 'Update Caption' : 'Submit Caption'}
       </button>
       {submitted && <p>Submitted ✓</p>}
@@ -451,6 +462,9 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
   const secondsLeft = useCountdown(
     vote?.rounds[vote.currentRound]?.[vote.currentMatchup]?.phaseEndsAt
   );
+  // ---- CHANGED: clearError on manual vote ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   if (!vote) return <p>Loading voting...</p>;
 
@@ -462,6 +476,9 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
   const totalRounds = vote.rounds.length;
 
   const handleVote = (choice: 'A' | 'B') => {
+    // ---- CHANGED: clear error on vote ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting SUBMIT_VOTE:', choice);
     socket.emit(SOCKET_EVENTS.SUBMIT_VOTE, {
       code: room.code,
@@ -535,6 +552,9 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   // ---- CHANGED ABOVE (A3) ----
   const [text, setText] = useState('');
   const autoSubmitted = useRef(false);
+  // ---- CHANGED: clearError on manual submit/vote ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   const writingSecondsLeft = useCountdown(comment?.phaseEndsAt);
   const votingSecondsLeft = useCountdown(comment?.votingEndsAt);
@@ -542,7 +562,10 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   const myCommentSubmitted = comment?.comments[myPlayerId] !== undefined;
   const votingOpen = comment?.votingEndsAt !== null;
 
-  const handleSubmitComment = () => {
+  const handleSubmitComment = (manual = false) => {
+    // ---- CHANGED: only clear error on manual submit ----
+    if (manual) clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting SUBMIT_COMMENT');
     socket.emit(SOCKET_EVENTS.SUBMIT_COMMENT, {
       code: room.code,
@@ -554,12 +577,15 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   useEffect(() => {
     if (writingSecondsLeft === 0 && !autoSubmitted.current) {
       autoSubmitted.current = true;
-      handleSubmitComment();
+      handleSubmitComment(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [writingSecondsLeft]);
 
   const handleCommentVote = (targetPlayerId: string, vote: 'up' | 'down' | null) => {
+    // ---- CHANGED: clear error on vote ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting SUBMIT_COMMENT_VOTE:', { targetPlayerId, vote });
     socket.emit(SOCKET_EVENTS.SUBMIT_COMMENT_VOTE, {
       code: room.code,
@@ -600,7 +626,7 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
           />
           <p style={{ fontSize: 12, color: '#888' }}>{text.length}/{GAME2_TEXT_MAX_LEN}</p>
           {/* ---- CHANGED ABOVE (B9) ---- */}
-          <button onClick={handleSubmitComment} style={{ color: '#000' }}>
+          <button onClick={() => handleSubmitComment(true)} style={{ color: '#000' }}>
             {myCommentSubmitted ? 'Update Comment' : 'Submit Comment'}
           </button>
           {myCommentSubmitted && <p>Submitted ✓</p>}
@@ -700,7 +726,14 @@ function ResultsPhase({ room }: { room: RoomPublic }) {
     .join(' / ');
   // ---- CHANGED ABOVE (A6+C9) ----
 
+  // ---- CHANGED: clearError on return to lobby ----
+  const { clearError } = useError();
+  // ---- CHANGED ABOVE ----
+
   const handleReturnToLobby = () => {
+    // ---- CHANGED: clear error before navigating ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting RETURN_TO_LOBBY');
     socket.emit(SOCKET_EVENTS.RETURN_TO_LOBBY, { code: room.code });
   };

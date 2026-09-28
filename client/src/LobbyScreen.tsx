@@ -9,29 +9,31 @@ import {
 } from '../../shared/constants';
 // ---- NEW ABOVE (A1) ----
 import { socket } from './socket';
+// ---- CHANGED: error now comes from context; localError removed ----
+import { useError } from './ErrorContext';
+// ---- CHANGED ABOVE ----
 
 interface LobbyScreenProps {
   room: RoomPublic | null;
   myPlayerId: string;
-  error: string;
-  // ---- NEW: callback to clear room state in GameController on leave ----
+  // ---- CHANGED: error prop removed — read from context instead ----
   onRoomCleared: () => void;
-  // ---- NEW ABOVE ----
 }
 
-export default function LobbyScreen({ room, myPlayerId, error, onRoomCleared }: LobbyScreenProps) {
+export default function LobbyScreen({ room, myPlayerId, onRoomCleared }: LobbyScreenProps) {
   const [name, setName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [selectedMode, setSelectedMode] = useState<GameMode | ''>('');
-  // ---- NEW: local error for client-side validation (e.g. no mode selected) ----
-  const [localError, setLocalError] = useState('');
-  // ---- NEW ABOVE ----
+  // ---- CHANGED: useError replaces both the error prop and localError state ----
+  const { error, setError, clearError } = useError();
+  // ---- CHANGED ABOVE ----
 
   const handleCreate = () => {
-    // ---- CHANGED: validate mode locally instead of emitting a noop ----
-    setLocalError('');
+    // ---- CHANGED: clear any previous error before every server request,
+    // then validate locally — if invalid, set error via context and stop ----
+    clearError();
     if (!selectedMode) {
-      setLocalError('Please choose a gamemode.');
+      setError('Please choose a gamemode.');
       return;
     }
     // ---- CHANGED ABOVE ----
@@ -40,23 +42,28 @@ export default function LobbyScreen({ room, myPlayerId, error, onRoomCleared }: 
   };
 
   const handleJoin = () => {
+    // ---- CHANGED: clear error before every server request ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     console.log('[client] emitting JOIN_ROOM:', { code: joinCode, name });
     socket.emit(SOCKET_EVENTS.JOIN_ROOM, { code: joinCode.toUpperCase(), name });
   };
 
   const handleStart = () => {
     if (!room) return;
+    // ---- CHANGED: clear error before every server request ----
+    clearError();
+    // ---- CHANGED ABOVE ----
     socket.emit(SOCKET_EVENTS.START_GAME, { code: room.code });
   };
 
   const handleLeave = () => {
     if (!room) return;
+    clearError();
     socket.emit(SOCKET_EVENTS.LEAVE_ROOM, { code: room.code, playerId: myPlayerId });
     sessionStorage.removeItem('playerId');
     sessionStorage.removeItem('roomCode');
-    // ---- CHANGED: notify parent to clear room/playerId state ----
     onRoomCleared();
-    // ---- CHANGED ABOVE ----
   };
 
   const me = room?.players.find((p) => p.playerId === myPlayerId);
@@ -98,9 +105,6 @@ export default function LobbyScreen({ room, myPlayerId, error, onRoomCleared }: 
             Join Room
           </button>
         </div>
-        {/* ---- CHANGED: show localError (client-side) alongside server error ---- */}
-        {(error || localError) && <p style={{ color: 'red' }}>{localError || error}</p>}
-        {/* ---- CHANGED ABOVE ---- */}
       </div>
     );
   }
