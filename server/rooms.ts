@@ -10,7 +10,7 @@ import {
   GAME2_FIRST_FRAME_MS, GAME2_FRAME_MS, GAME2_CAPTION_MS,
   GAME2_VOTE_ROUND_MS, GAME2_COMMENT_MS,
   // ---- NEW (A5): replace GRACE_PERIOD_MS with the two named constants ----
-  INPUT_GRACE_MS, SERVER_BUFFER_MS,
+  INPUT_GRACE_MS, SERVER_BUFFER_MS, READING_DELAY_MS,
   // ---- NEW (A7): shared gameplay rule constants ----
   MIN_PLAYERS_TO_START, MAX_PLAYERS_RAP_BATTLE, MAX_PLAYERS_GAMEMODE2, GAME2_TEXT_MAX_LEN,
   // ---- NEW (B8): SAMPLES moved to shared so server can derive BEAT_ROWS ----
@@ -297,7 +297,7 @@ function startPerformancePhase(room: Room, broadcastRoom: (roomCode: string) => 
   // ---- CHANGED ABOVE (A2+D1) ----
 
   const numCouplets = room.settings.numCouplets;
-  const performanceMs = numCouplets * LOOP_MS;
+  const performanceMs = READING_DELAY_MS + numCouplets * LOOP_MS;
   console.log(`[rooms] Room ${room.code}: performance phase starts at ${startAt} (grace window: ${SERVER_BUFFER_MS}ms)`);
 
   broadcastRoom(room.code);
@@ -798,7 +798,8 @@ function openCommentVoting(room: Room, votingMs: number, broadcastRoom: (roomCod
   console.log(`[rooms] Room ${room.code}: comment voting open for ${votingMs}ms`);
   broadcastRoom(room.code);
 
-  scheduleGame2Timer(room.code, votingMs, () => {
+  // votingMs is the nominal on-screen duration; add the same grace + dead window as every other phase
+  scheduleGame2Timer(room.code, votingMs + INPUT_GRACE_MS + SERVER_BUFFER_MS, () => {
     resolveCommentWinner(room, broadcastRoom);
   });
 }

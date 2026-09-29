@@ -25,7 +25,7 @@ export default function LobbyScreen({ room, myPlayerId, onRoomCleared }: LobbySc
   const [joinCode, setJoinCode] = useState('');
   const [selectedMode, setSelectedMode] = useState<GameMode | ''>('');
   // ---- CHANGED: useError replaces both the error prop and localError state ----
-  const { error, setError, clearError } = useError();
+  const { setError, clearError } = useError();
   // ---- CHANGED ABOVE ----
 
   const handleCreate = () => {
@@ -117,7 +117,7 @@ export default function LobbyScreen({ room, myPlayerId, onRoomCleared }: LobbySc
       <ul>
         {room.players.map((p) => (
           <li key={p.playerId}>
-            {p.name} {p.isHost && '(Host)'} {p.role && `— ${p.role}`}
+            {p.name}{p.playerId === myPlayerId && <span style={{ color: '#7ec8ff' }}> (you)</span>} {p.isHost && '(Host)'} {p.role && `— ${p.role}`}
           </li>
         ))}
       </ul>
@@ -141,7 +141,6 @@ export default function LobbyScreen({ room, myPlayerId, onRoomCleared }: LobbySc
       <button onClick={handleLeave} style={{ color: '#000000' }}>
         Leave Room
       </button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
     </div>
   );
 }

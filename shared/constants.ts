@@ -16,12 +16,21 @@ export const GAME2_COMMENT_MS = 45_000;       // 45s to write a comment
 export const GAME2_FPS = 16;                  // animation playback framerate
 // comment voting duration = playerCount * 15s, computed at runtime
 
-// ---- NEW (A5): grace/buffer constants that replace the old GRACE_PERIOD_MS = 3000 ----
-// INPUT_GRACE_MS: extra time after phaseEndsAt where inputs are still accepted
-//   before the server transitions. Shown as "Time's up, submitting..." on the client.
-// SERVER_BUFFER_MS: lead-in before audio/animation starts so clients can sync up.
-// Together they replace every use of the old GRACE_PERIOD_MS.
+// ---- (A5) grace / buffer — every timed phase runs on this timeline (D = on-screen duration):
+//   0 ── D ── D + INPUT_GRACE_MS ── D + INPUT_GRACE_MS + SERVER_BUFFER_MS
+//   normal    grace: inputs still     dead window: inputs locked, auto-submits    server
+//   play      editable, "Time's up"   already sent and in flight                  transitions
+// INPUT_GRACE_MS: extra time after the countdown hits 0 where the player can still edit
+//   and manually submit. At the end of it the client auto-submits and locks inputs.
+// SERVER_BUFFER_MS: the server waits this long AFTER the input grace before moving on,
+//   so auto-submits can arrive first (race-condition guard). Also used as the
+//   "Get ready..." lead-in before the rap performance.
+// Server timer per phase = D + INPUT_GRACE_MS + SERVER_BUFFER_MS. ----
 export const INPUT_GRACE_MS = 2000;
+// READING_DELAY_MS: window after the grace phase where the rapper sees the topic
+// and "Get ready to rap..." before the carousel and beat start. Shared so the
+// server's round-end timer accounts for it.
+export const READING_DELAY_MS = 3000;
 export const SERVER_BUFFER_MS = 2000;
 // ---- NEW ABOVE (A5) ----
 

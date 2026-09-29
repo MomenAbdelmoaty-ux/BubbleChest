@@ -13,19 +13,10 @@ import { socket } from './socket';
 // ---- CHANGED: import useError so every manual submit handler can clear stale errors ----
 import { useError } from './ErrorContext';
 // ---- CHANGED ABOVE ----
+import { useCountdown } from './useCountdown';
 
-// ---- Countdown hook ----
-function useCountdown(endsAt: number | undefined | null) {
-  const [secondsLeft, setSecondsLeft] = useState(-1);
-  useEffect(() => {
-    if (!endsAt) return;
-    const tick = () => setSecondsLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
-    tick();
-    const interval = setInterval(tick, 250);
-    return () => clearInterval(interval);
-  }, [endsAt]);
-  return secondsLeft;
-}
+// useCountdown now lives in ./useCountdown (shared with PrepPhase).
+// It returns { secondsLeft, inGracePeriod, graceOver } — see that file for the timeline.
 
 // ---- NEW (D3): single function to compute canvas size, replacing three
 // identical Math.floor(window.innerWidth / 3) expressions in the file ----
@@ -75,8 +66,13 @@ function DrawingCanvas({
   const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(6);
   const undoStackRef = useRef<string[]>([]);
-  const secondsLeft = useCountdown(phaseEndsAt);
-  const autoSubmitted = useRef(false);
+  // grace: canvas stays drawable during INPUT_GRACE_MS after 0; auto-submit at graceOver
+  const { secondsLeft, inGracePeriod, graceOver } = useCountdown(phaseEndsAt);
+  const hasSubmitted = useRef(false);
+  const lockedRef = useRef(false);
+  // true once the drawer manually submits: the turn is over, so lock everything
+  const [submittedManually, setSubmittedManually] = useState(false);
+  const locked = graceOver || submittedManually;
   // ---- CHANGED: clearError for manual submit ----
   const { clearError } = useError();
   // ---- CHANGED ABOVE ----
@@ -119,6 +115,7 @@ function DrawingCanvas({
     const brushRef = { current: brushSize };
 
     const startDrawing = (x: number, y: number) => {
+      if (lockedRef.current) return;
       isDrawingRef.current = true;
       ctx.strokeStyle = colorRef.current;
       ctx.lineWidth = brushRef.current;
@@ -129,7 +126,7 @@ function DrawingCanvas({
     };
 
     const draw = (x: number, y: number) => {
-      if (!isDrawingRef.current) return;
+      if (!isDrawingRef.current || lockedRef.current) return;
       ctx.lineTo(x, y);
       ctx.stroke();
     };
@@ -176,14 +173,19 @@ function DrawingCanvas({
     if (brushRef) brushRef.current = brushSize;
   }, [color, brushSize]);
 
+  // Lock drawing for the dead window (graceOver → server transition)
   useEffect(() => {
-    if (secondsLeft === 0 && !autoSubmitted.current) {
-      autoSubmitted.current = true;
+    lockedRef.current = locked;
+  }, [locked]);
+
+  useEffect(() => {
+    if (graceOver && !hasSubmitted.current) {
+      hasSubmitted.current = true;
       const canvas = canvasRef.current;
       // ---- note: no clearError here — auto-submit, not user-initiated ----
       if (canvas) onSubmit(canvas.toDataURL('image/png'));
     }
-  }, [secondsLeft, onSubmit]);
+  }, [graceOver, onSubmit]);
 
   const handleUndo = () => {
     const canvas = canvasRef.current;
@@ -233,8 +235,13 @@ function DrawingCanvas({
     // ---- CHANGED: clear error on manual submit ----
     clearError();
     // ---- CHANGED ABOVE ----
+    // ref guard is synchronous, so a fast double-click can't emit twice
+    if (hasSubmitted.current) return;
+    // a manual submit ends this turn, so the auto-submit must not fire as well
+    hasSubmitted.current = true;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    setSubmittedManually(true);
     onSubmit(canvas.toDataURL('image/png'));
   };
 
@@ -247,6 +254,9 @@ function DrawingCanvas({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
       <p>Time left: {secondsLeft}s</p>
+      {inGracePeriod && <p>Time's up, submitting...</p>}
+      {graceOver && <p>Time's up — locked in.</p>}
+      {submittedManually && !graceOver && <p>Frame submitted ✓ — waiting for the next drawer...</p>}
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {previousFrame && (
@@ -292,10 +302,10 @@ function DrawingCanvas({
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={handleUndo} style={{ color: '#000' }}>Undo</button>
-        <button onClick={handleBlank} style={{ color: '#000' }}>Blank</button>
-        <button onClick={handleReset} style={{ color: '#000' }}>Reset</button>
-        <button onClick={handleSubmit} style={{ color: '#000' }}>Submit Frame</button>
+        <button onClick={handleUndo} disabled={locked} style={{ color: '#000' }}>Undo</button>
+        <button onClick={handleBlank} disabled={locked} style={{ color: '#000' }}>Blank</button>
+        <button onClick={handleReset} disabled={locked} style={{ color: '#000' }}>Reset</button>
+        <button onClick={handleSubmit} disabled={locked} style={{ color: '#000' }}>Submit Frame</button>
       </div>
     </div>
   );
@@ -394,7 +404,7 @@ function AnimationPlayer({ frames }: { frames: string[] }) {
 function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: string }) {
   const caption = room.game2State?.captionState;
   const [text, setText] = useState('');
-  const secondsLeft = useCountdown(caption?.phaseEndsAt);
+  const { secondsLeft, inGracePeriod, graceOver } = useCountdown(caption?.phaseEndsAt);
   const autoSubmitted = useRef(false);
   const submitted = caption?.captions[myPlayerId] !== undefined;
   // ---- CHANGED: clearError on manual submit ----
@@ -413,13 +423,14 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
     });
   };
 
+  // emergency auto-submit at the END of the grace window — skipped if they already submitted
   useEffect(() => {
-    if (secondsLeft === 0 && !autoSubmitted.current) {
+    if (graceOver && !autoSubmitted.current && !submitted) {
       autoSubmitted.current = true;
       handleSubmit(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [secondsLeft]);
+  }, [graceOver]);
 
   // ---- CHANGED (A3): game2State.drawState.frames ----
   const frames = room.game2State?.drawState?.frames ?? [];
@@ -429,6 +440,8 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
       <h1>Write a caption!</h1>
       <p>Time left: {secondsLeft}s</p>
+      {inGracePeriod && <p>Time's up, submitting...</p>}
+      {graceOver && <p>Time's up — locked in.</p>}
       <AnimationPlayer frames={frames} />
       {/* ---- CHANGED (B9): GAME2_TEXT_MAX_LEN replaces hardcoded 300 ---- */}
       <textarea
@@ -437,12 +450,13 @@ function CaptionPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
         maxLength={GAME2_TEXT_MAX_LEN}
         rows={3}
         cols={40}
+        disabled={graceOver}
         placeholder="Write your caption..."
         style={{ color: '#000', resize: 'none' }}
       />
       <p style={{ fontSize: 12, color: '#888' }}>{text.length}/{GAME2_TEXT_MAX_LEN}</p>
       {/* ---- CHANGED ABOVE (B9) ---- */}
-      <button onClick={() => handleSubmit(true)} style={{ color: '#000' }}>
+      <button onClick={() => handleSubmit(true)} disabled={graceOver} style={{ color: '#000' }}>
         {submitted ? 'Update Caption' : 'Submit Caption'}
       </button>
       {submitted && <p>Submitted ✓</p>}
@@ -459,7 +473,7 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
   // ---- CHANGED (A3): drawState ----
   const frames = room.game2State?.drawState?.frames ?? [];
   // ---- CHANGED ABOVE (A3) ----
-  const secondsLeft = useCountdown(
+  const { secondsLeft, inGracePeriod, graceOver } = useCountdown(
     vote?.rounds[vote.currentRound]?.[vote.currentMatchup]?.phaseEndsAt
   );
   // ---- CHANGED: clearError on manual vote ----
@@ -475,7 +489,13 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
   const roundNum = vote.currentRound + 1;
   const totalRounds = vote.rounds.length;
 
+  // ---- CHANGED (C9/A6): winner is now string | null; null means not yet tallied ----
+  // Votes stay changeable during the grace window; results show and buttons lock at graceOver
+  const showResults = graceOver || currentMatchup.winner !== null;
+  // ---- CHANGED ABOVE (C9/A6) ----
+
   const handleVote = (choice: 'A' | 'B') => {
+    if (showResults) return;
     // ---- CHANGED: clear error on vote ----
     clearError();
     // ---- CHANGED ABOVE ----
@@ -487,10 +507,6 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
     });
   };
 
-  // ---- CHANGED (C9/A6): winner is now string | null; null means not yet tallied ----
-  const showResults = secondsLeft === 0 || currentMatchup.winner !== null;
-  // ---- CHANGED ABOVE (C9/A6) ----
-
   const countA = Object.values(currentMatchup.votes).filter((v) => v === 'A').length;
   const countB = Object.values(currentMatchup.votes).filter((v) => v === 'B').length;
 
@@ -499,11 +515,13 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
       <h1>Vote for your favourite caption!</h1>
       <p>Round {roundNum} of {totalRounds}</p>
       <p>Time left: {secondsLeft}s</p>
+      {inGracePeriod && <p>Time's up — last chance to vote!</p>}
       <AnimationPlayer frames={frames} />
 
       <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
         <button
           onClick={() => handleVote('A')}
+          disabled={showResults}
           style={{
             color: '#000',
             padding: '16px 24px',
@@ -512,7 +530,7 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
             border: '2px solid #999',
             borderRadius: 8,
             maxWidth: 240,
-            cursor: 'pointer',
+            cursor: showResults ? 'default' : 'pointer',
           }}
         >
           {currentMatchup.captionA.text || '(no caption submitted)'}
@@ -521,6 +539,7 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
 
         <button
           onClick={() => handleVote('B')}
+          disabled={showResults}
           style={{
             color: '#000',
             padding: '16px 24px',
@@ -529,7 +548,7 @@ function VotingPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: strin
             border: '2px solid #999',
             borderRadius: 8,
             maxWidth: 240,
-            cursor: 'pointer',
+            cursor: showResults ? 'default' : 'pointer',
           }}
         >
           {currentMatchup.captionB.text || '(no caption submitted)'}
@@ -556,8 +575,16 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
   const { clearError } = useError();
   // ---- CHANGED ABOVE ----
 
-  const writingSecondsLeft = useCountdown(comment?.phaseEndsAt);
-  const votingSecondsLeft = useCountdown(comment?.votingEndsAt);
+  const {
+    secondsLeft: writingSecondsLeft,
+    inGracePeriod: writingGrace,
+    graceOver: writingOver,
+  } = useCountdown(comment?.phaseEndsAt);
+  const {
+    secondsLeft: votingSecondsLeft,
+    inGracePeriod: votingGrace,
+    graceOver: votingOver,
+  } = useCountdown(comment?.votingEndsAt);
 
   const myCommentSubmitted = comment?.comments[myPlayerId] !== undefined;
   const votingOpen = comment?.votingEndsAt !== null;
@@ -574,15 +601,17 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
     });
   };
 
+  // emergency auto-submit — skipped if they already submitted a comment
   useEffect(() => {
-    if (writingSecondsLeft === 0 && !autoSubmitted.current) {
+    if (writingOver && !autoSubmitted.current && !myCommentSubmitted) {
       autoSubmitted.current = true;
       handleSubmitComment(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [writingSecondsLeft]);
+  }, [writingOver]);
 
   const handleCommentVote = (targetPlayerId: string, vote: 'up' | 'down' | null) => {
+    if (votingOver) return;
     // ---- CHANGED: clear error on vote ----
     clearError();
     // ---- CHANGED ABOVE ----
@@ -614,6 +643,8 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
       {!votingOpen && (
         <>
           <p>Write a comment! Time left: {writingSecondsLeft}s</p>
+          {writingGrace && <p>Time's up, submitting...</p>}
+          {writingOver && <p>Time's up — locked in.</p>}
           {/* ---- CHANGED (B9): GAME2_TEXT_MAX_LEN replaces hardcoded 300 ---- */}
           <textarea
             value={text}
@@ -621,12 +652,13 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
             maxLength={GAME2_TEXT_MAX_LEN}
             rows={3}
             cols={40}
+            disabled={writingOver}
             placeholder="Write a funny comment..."
             style={{ color: '#000', resize: 'none' }}
           />
           <p style={{ fontSize: 12, color: '#888' }}>{text.length}/{GAME2_TEXT_MAX_LEN}</p>
           {/* ---- CHANGED ABOVE (B9) ---- */}
-          <button onClick={() => handleSubmitComment(true)} style={{ color: '#000' }}>
+          <button onClick={() => handleSubmitComment(true)} disabled={writingOver} style={{ color: '#000' }}>
             {myCommentSubmitted ? 'Update Comment' : 'Submit Comment'}
           </button>
           {myCommentSubmitted && <p>Submitted ✓</p>}
@@ -636,6 +668,8 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
       {votingOpen && (
         <>
           <p>Time left to vote: {votingSecondsLeft}s</p>
+          {votingGrace && <p>Time's up — last chance to vote!</p>}
+          {votingOver && <p>Voting closed — tallying...</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 600 }}>
             {Object.values(comment?.comments ?? {}).map((c) => {
               const authorName = room.players.find((p) => p.playerId === c.playerId)?.name ?? '?';
@@ -661,6 +695,7 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                     <button
                       onClick={() => handleCommentVote(c.playerId, myVote === 'up' ? null : 'up')}
+                      disabled={votingOver}
                       style={{
                         color: '#000',
                         backgroundColor: myVote === 'up' ? '#4caf50' : '#eee',
@@ -674,6 +709,7 @@ function CommentPhase({ room, myPlayerId }: { room: RoomPublic; myPlayerId: stri
                     </button>
                     <button
                       onClick={() => handleCommentVote(c.playerId, myVote === 'down' ? null : 'down')}
+                      disabled={votingOver}
                       style={{
                         color: '#000',
                         backgroundColor: myVote === 'down' ? '#e63946' : '#eee',

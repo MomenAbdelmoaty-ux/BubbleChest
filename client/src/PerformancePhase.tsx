@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 // ---- CHANGED (A1): RoomPublic from types; LOOP_MS from constants ----
 import type { RoomPublic } from '../../shared/types';
-import { LOOP_MS } from '../../shared/constants';
+import { LOOP_MS, READING_DELAY_MS } from '../../shared/constants';
 // ---- CHANGED ABOVE (A1) ----
 import { schedulePlayback } from './audio';
 
@@ -61,6 +61,9 @@ function topicWordStyle(): CSSProperties {
 
 function PerformancePhase({ room }: { room: RoomPublic }) {
   const [lineIndex, setLineIndex] = useState(0);
+  // ---- NEW: reading window — carousel and audio are held until this is true ----
+  const [readingDone, setReadingDone] = useState(false);
+  // ---- NEW ABOVE ----
   const audioStarted = useRef(false);
 
   // ---- CHANGED (A2+A3): rapBattle.prepState and rapBattle.performanceState ----
@@ -69,23 +72,36 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
   const coupletEndings = rapBattle?.prepState?.coupletEndings ?? [];
   const startAt = rapBattle?.performanceState?.startAt;
   const isGrace = rapBattle?.phase === 'grace';
+  // Carousel + audio are anchored to the END of the reading window, not startAt
+  const beatStartAt = startAt !== undefined ? startAt + READING_DELAY_MS : undefined;
   // ---- CHANGED ABOVE (A2+A3) ----
 
+  // ---- NEW: 3-second reading delay before carousel and audio begin ----
   useEffect(() => {
-    // ---- CHANGED (A2+D1): only schedule audio once we're out of grace and have prep data ----
-    if (!startAt || !rapBattle?.prepState || audioStarted.current || isGrace) return;
-    // ---- CHANGED ABOVE (A2+D1) ----
-    audioStarted.current = true;
-    void schedulePlayback(rapBattle.prepState.beatGrid, startAt, room.numCouplets);
-  }, [startAt, isGrace]);
+    if (isGrace || !startAt) return;
+    const timer = setTimeout(() => setReadingDone(true), Math.max(0, startAt + READING_DELAY_MS - Date.now()));
+    return () => clearTimeout(timer);
+  }, [isGrace, startAt]);
+  // ---- NEW ABOVE ----
 
   useEffect(() => {
-    if (!startAt) return;
+    // ---- CHANGED (A2+D1): only schedule audio once we're out of grace, reading is done,
+    // and we have prep data ----
+    if (!beatStartAt || !rapBattle?.prepState || audioStarted.current || isGrace || !readingDone) return;
+    // ---- CHANGED ABOVE (A2+D1) ----
+    audioStarted.current = true;
+    void schedulePlayback(rapBattle.prepState.beatGrid, beatStartAt, room.numCouplets);
+  }, [beatStartAt, isGrace, readingDone]);
+
+  useEffect(() => {
+    // ---- CHANGED: don't start carousel until reading delay is done ----
+    if (!beatStartAt || !readingDone) return;
+    // ---- CHANGED ABOVE ----
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
 
     const scheduleNext = (index: number) => {
-      const targetTime = startAt + index * LOOP_MS;
+      const targetTime = beatStartAt + index * LOOP_MS;
       const delay = Math.max(0, targetTime - Date.now());
       timeoutId = setTimeout(() => {
         if (cancelled) return;
@@ -101,7 +117,7 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [startAt, room.numCouplets]);
+  }, [beatStartAt, room.numCouplets, readingDone]);
 
   // ---- CHANGED (D1): show a "Get ready..." state during the grace/buffer window ----
   if (isGrace) {
@@ -121,6 +137,28 @@ function PerformancePhase({ room }: { room: RoomPublic }) {
     );
   }
   // ---- CHANGED ABOVE (D1) ----
+
+  // ---- NEW: show topic during the reading window before carousel starts ----
+  if (!readingDone) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '80vh',
+          gap: 24,
+        }}
+      >
+        <p style={topicStyle()}>
+          Topic: <span style={topicWordStyle()}>{topic}</span>
+        </p>
+        <h2 style={{ color: '#ccc', fontSize: 24 }}>Get ready to rap...</h2>
+      </div>
+    );
+  }
+  // ---- NEW ABOVE ----
 
   const topLine = coupletEndings[lineIndex];
   const bottomLine = coupletEndings[lineIndex + 1];
