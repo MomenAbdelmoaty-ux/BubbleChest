@@ -753,6 +753,12 @@ export function submitVote(roomCode: string, playerId: string, vote: 'A' | 'B'):
 
   const matchup = voteState.rounds[voteState.currentRound]?.[voteState.currentMatchup];
   if (!matchup) return { error: 'No active matchup.' };
+  // ---- NEW: reject votes for a matchup that's already been tallied. Without this,
+  // a vote that arrives late (e.g. from a client that silently reconnected and is
+  // running on stale state) gets applied to whatever matchup is CURRENT by the time
+  // it arrives — which may be a completely different matchup the voter never saw. ----
+  if (matchup.winner !== null) return { error: 'Voting has closed for this matchup.' };
+  // ---- NEW ABOVE ----
 
   matchup.votes[playerId] = vote;
   console.log(`[rooms] Room ${roomCode}: ${playerId} voted ${vote} in round ${voteState.currentRound} matchup ${voteState.currentMatchup}`);
@@ -867,6 +873,15 @@ export function submitCommentVote(
   const comment = room.game2State?.commentState;
   // ---- CHANGED ABOVE (A3) ----
   if (!comment) return { error: 'Not in comment phase.' };
+  // ---- NEW: reject votes once the phase has moved past commenting, or before voting
+  // has opened. Without this, a straggling vote (e.g. from a client that silently
+  // reconnected and never learned the phase had already resolved) still mutates
+  // upvotes/downvotes after resolveCommentWinner already ran and picked a winner —
+  // changing the tally invisibly, since the winner is never recalculated. ----
+  if (room.game2State?.phase !== 'commenting' || !comment.votingEndsAt) {
+    return { error: 'Comment voting is not open.' };
+  }
+  // ---- NEW ABOVE ----
 
   const target = comment.comments[targetPlayerId];
   if (!target) return { error: 'Comment not found.' };

@@ -2,7 +2,7 @@
 // It's pulled out into its own module here so PrepPhase.tsx (and any future
 // phase component) can import the same shared connection, instead of each
 // component accidentally creating its own separate socket.
- 
+
 // ---- CHANGED (D2): connect to whatever origin served this page, instead of a
 // hardcoded localhost:3000. This matters for two reasons:
 //   1. A page loaded from a public tunnel URL (Cloudflare, ngrok, etc.) trying to
@@ -20,5 +20,5 @@
 // won't reach the Node server on 3000 — Vite would need a proxy for socket.io, or
 // you'd tunnel 3000 directly (with `npm run build` output up to date). ----
 import { io, type Socket } from 'socket.io-client';
- 
-export const socket: Socket = io(import.meta.env.VITE_SERVER_URL || undefined);
+
+export const socket: Socket = io();

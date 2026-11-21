@@ -26,17 +26,33 @@ export default function GameController() {
   const [myPlayerId, setMyPlayerId] = useState('');
   const { setError } = useError();
 
-  // Rejoin on mount if session data is present
+  // ---- CHANGED: rejoin on every successful connection, not just page mount.
+  // socket.io-client auto-reconnects on its own after a dropped connection (common
+  // over a flaky tunnel), handing out a brand-new socket id each time. The server
+  // has no way to know that new socket belongs to an existing player unless we tell
+  // it again — otherwise the new socket never rejoins the Socket.IO room (so it stops
+  // receiving broadcasts, looking "stuck") and the disconnect's pending-removal timer
+  // is never cancelled (so the player gets silently kicked ~10s later even though
+  // they're still connected and interacting). 'connect' fires for the first
+  // connection AND every reconnect, so one listener covers both cases. ----
   useEffect(() => {
-    const savedPlayerId = sessionStorage.getItem('playerId');
-    const savedRoomCode = sessionStorage.getItem('roomCode');
-    if (savedPlayerId && savedRoomCode) {
-      socket.emit(SOCKET_EVENTS.REJOIN_ROOM, {
-        playerId: savedPlayerId,
-        roomCode: savedRoomCode,
-      });
-    }
+    const rejoinIfSaved = () => {
+      const savedPlayerId = sessionStorage.getItem('playerId');
+      const savedRoomCode = sessionStorage.getItem('roomCode');
+      if (savedPlayerId && savedRoomCode) {
+        console.log('[client] (re)connected — attempting rejoin:', savedRoomCode);
+        socket.emit(SOCKET_EVENTS.REJOIN_ROOM, {
+          playerId: savedPlayerId,
+          roomCode: savedRoomCode,
+        });
+      }
+    };
+    socket.on('connect', rejoinIfSaved);
+    return () => {
+      socket.off('connect', rejoinIfSaved);
+    };
   }, []);
+  // ---- CHANGED ABOVE ----
 
   useEffect(() => {
     socket.on(SOCKET_EVENTS.ROOM_UPDATE, (data: RoomPublic & { yourPlayerId?: string }) => {

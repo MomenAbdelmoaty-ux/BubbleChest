@@ -20,8 +20,16 @@ import { useCountdown } from './useCountdown';
 
 // ---- NEW (D3): single function to compute canvas size, replacing three
 // identical Math.floor(window.innerWidth / 3) expressions in the file ----
+// ---- CHANGED: fixed resolution for every player, regardless of window size.
+// Frames are saved at exactly whatever pixel size they were drawn at (via
+// canvas.toDataURL). If that varied per device — as it did when this was based on
+// window.innerWidth — a frame drawn small on one player's phone gets stretched up
+// (blurry) whenever it's displayed larger later: as the next drawer's underlay, or
+// during final playback. A fixed size means every frame is captured at the same
+// native resolution, so nothing needs to be upscaled. ----
+const CANVAS_SIZE = 512;
 function getCanvasSize(): number {
-  return Math.floor(window.innerWidth / 3);
+  return CANVAS_SIZE;
 }
 // ---- NEW ABOVE (D3) ----
 
@@ -173,7 +181,7 @@ function DrawingCanvas({
     if (brushRef) brushRef.current = brushSize;
   }, [color, brushSize]);
 
-  // Lock drawing for the dead window (graceOver → server transition)
+  // Mirror `locked` into a ref so the mouse handlers (attached once) see live values
   useEffect(() => {
     lockedRef.current = locked;
   }, [locked]);
