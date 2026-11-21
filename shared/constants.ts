@@ -8,12 +8,12 @@ export const STEP_MS = 60000 / BPM / 2;
 export const LOOP_MS = STEP_MS * BEAT_STEPS;
 
 // ---- Gamemode 2 timing constants ----
-export const GAME2_FIRST_FRAME_MS = 120_000;  // 120s for the very first frame
-export const GAME2_FRAME_MS = 60_000;         // 60s for all other frames
-export const GAME2_CAPTION_MS = 30_000;       // 30s to write a caption
-export const GAME2_VOTE_ROUND_MS = 10_000;    // 10s per bracket round
-export const GAME2_COMMENT_MS = 45_000;       // 45s to write a comment
-export const GAME2_FPS = 16;                  // animation playback framerate
+export const GAME2_FIRST_FRAME_MS = 180_000;  // 180s for the very first frame
+export const GAME2_FRAME_MS = 180_000;         // 180s for all other frames
+export const GAME2_CAPTION_MS = 60_000;       // 60s to write a caption
+export const GAME2_VOTE_ROUND_MS = 15_000;    // 15s per bracket round
+export const GAME2_COMMENT_MS = 60_000;       // 60s to write a comment
+export const GAME2_FPS = 8;                  // animation playback framerate
 // comment voting duration = playerCount * 15s, computed at runtime
 
 // ---- (A5) grace / buffer — every timed phase runs on this timeline (D = on-screen duration):
