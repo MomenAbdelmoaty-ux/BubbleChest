@@ -23,9 +23,7 @@ app.get('*path', (_req, res) => {
 });
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: '*' }
-});
+const io = new Server(httpServer);
 
 // ---- NEW: named broadcast helpers so the same logic isn't repeated inline
 // every time rooms.ts needs to push a phase transition to clients.
